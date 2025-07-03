@@ -21,21 +21,12 @@
         return fetch(src)
             .then(r => r.text())
             .then(code => {
-                const blob = new Blob([code], { type: 'text/javascript' });
-                const blobUrl = URL.createObjectURL(blob);
-                return new Promise((resolve, reject) => {
-                    const s = document.createElement('script');
-                    s.src = blobUrl;
-                    s.onload = () => {
-                        URL.revokeObjectURL(blobUrl);
-                        resolve();
-                    };
-                    s.onerror = e => {
-                        URL.revokeObjectURL(blobUrl);
-                        reject(e);
-                    };
-                    document.head.appendChild(s);
-                });
+                try {
+                    new Function(code)();
+                    return Promise.resolve();
+                } catch (e) {
+                    return Promise.reject(e);
+                }
             });
     }
 
