@@ -4,7 +4,8 @@
     // ---- CONFIG ----
     const BASE_INTERVAL_SECONDS = 600;  // base interval between runs in seconds
     const INTERVAL_JITTER_SECONDS = 60; // jitter up to this many seconds
-    const SCRIPT_URL = 'https://shinko-to-kuma.com/scripts/massScavenge.js';
+    // Load the bundled massScavenge script from the extension instead of a remote host
+    const SCRIPT_URL = chrome.runtime.getURL('scripts/vendor/massScavenge.js');
     const CLICK_MIN_DELAY = 200;   // minimum ms before first click
     const CLICK_MAX_DELAY = 800;   // maximum ms before first click
     const SECOND_CLICK_MIN = 300;  // minimum ms after first click

@@ -3,7 +3,8 @@
 
     // ---- CONFIG ----
     const INTERVAL_SECONDS = 600;           // 15 minutes
-    const SCRIPT_URL = 'https://cdn.jsdelivr.net/gh/enikvc/tribals_it_scripts@refs/tags/1.2/farmgod.js';
+    // Load the bundled farmgod script from the extension instead of a remote host
+    const SCRIPT_URL = chrome.runtime.getURL('scripts/vendor/farmgod.js');
     const PLAN_DELAY = 700;                 // ms after script load before clicking Plan farms
     const ICON_START_DELAY = 1000;          // ms after Plan farms click before selecting icons
     const ICON_CLICK_INTERVAL = 527;       // ms between each farm icon click
