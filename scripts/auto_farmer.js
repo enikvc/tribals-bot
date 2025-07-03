@@ -1,12 +1,3 @@
-// ==UserScript==
-// @name         Tribals Auto Farmer
-// @namespace    http://tampermonkey.net/
-// @version      1.3.0
-// @description  Toggle to auto-load farmgod.js, show modal, click Plan farms, then farm icons every 15 minutes (only between 8:00 and 03:00)
-// @match        https://*.tribals.it/game.php?*screen=am_farm*
-// @grant        none
-// ==/UserScript==
-
 (function() {
     'use strict';
 
