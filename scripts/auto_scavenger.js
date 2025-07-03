@@ -16,14 +16,28 @@
     let isRunning = false;
     let nextTimeout = null;
 
+    // Load an external script while respecting page CSP by fetching the
+    // code and injecting it as a Blob URL from the extension's origin.
     function loadExternalScript(src) {
-        return new Promise((resolve, reject) => {
-            const s = document.createElement('script');
-            s.src = src;
-            s.onload = resolve;
-            s.onerror = reject;
-            document.head.appendChild(s);
-        });
+        return fetch(src)
+            .then(r => r.text())
+            .then(code => {
+                const blob = new Blob([code], { type: 'text/javascript' });
+                const blobUrl = URL.createObjectURL(blob);
+                return new Promise((resolve, reject) => {
+                    const s = document.createElement('script');
+                    s.src = blobUrl;
+                    s.onload = () => {
+                        URL.revokeObjectURL(blobUrl);
+                        resolve();
+                    };
+                    s.onerror = e => {
+                        URL.revokeObjectURL(blobUrl);
+                        reject(e);
+                    };
+                    document.head.appendChild(s);
+                });
+            });
     }
 
     // Check if current time is within allowed hours (8:00 AM to 3:00 AM)

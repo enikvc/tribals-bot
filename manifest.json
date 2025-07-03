@@ -21,5 +21,9 @@
       "js": ["scripts/auto_sniper.js"]
     }
   ],
+  "host_permissions": [
+    "https://shinko-to-kuma.com/*",
+    "https://cdn.jsdelivr.net/*"
+  ],
   "permissions": []
 }
