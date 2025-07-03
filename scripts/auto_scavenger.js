@@ -4,7 +4,6 @@
     // ---- CONFIG ----
     const BASE_INTERVAL_SECONDS = 600;  // base interval between runs in seconds
     const INTERVAL_JITTER_SECONDS = 60; // jitter up to this many seconds
-    const SCRIPT_URL = 'https://shinko-to-kuma.com/scripts/massScavenge.js';
     const CLICK_MIN_DELAY = 200;   // minimum ms before first click
     const CLICK_MAX_DELAY = 800;   // maximum ms before first click
     const SECOND_CLICK_MIN = 300;  // minimum ms after first click
@@ -15,17 +14,6 @@
 
     let isRunning = false;
     let nextTimeout = null;
-
-    function loadExternalScript(src) {
-        return new Promise((resolve, reject) => {
-            const s = document.createElement('script');
-            s.src = src;
-            s.onload = resolve;
-            s.onerror = reject;
-            document.head.appendChild(s);
-        });
-    }
-
     // Check if current time is within allowed hours (8:00 AM to 3:00 AM)
     function isWithinActiveHours() {
         const now = new Date();
@@ -142,15 +130,9 @@
             return;
         }
 
-        loadExternalScript(SCRIPT_URL)
-            .then(() => {
-                console.log(`[Auto-Scavenger] Script loaded at ${new Date().toLocaleTimeString()}`);
-                clickSequence();
-            })
-            .catch((e) => {
-                console.error('[Auto-Scavenger] Failed to load script:', e);
-            })
-            .finally(scheduleNext);
+        Promise.resolve().then(() => {
+            clickSequence();
+        }).finally(scheduleNext);
     }
 
     // Schedule next run with jitter (only if within active hours)

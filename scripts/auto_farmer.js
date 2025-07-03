@@ -3,7 +3,6 @@
 
     // ---- CONFIG ----
     const INTERVAL_SECONDS = 600;           // 15 minutes
-    const SCRIPT_URL = 'https://cdn.jsdelivr.net/gh/enikvc/tribals_it_scripts@refs/tags/1.2/farmgod.js';
     const PLAN_DELAY = 700;                 // ms after script load before clicking Plan farms
     const ICON_START_DELAY = 1000;          // ms after Plan farms click before selecting icons
     const ICON_CLICK_INTERVAL = 527;       // ms between each farm icon click
@@ -13,17 +12,6 @@
 
     let isRunning = false;
     let nextTimeout = null;
-
-    function loadExternalScript(src) {
-        return new Promise((resolve, reject) => {
-            const s = document.createElement('script');
-            s.src = src;
-            s.onload = resolve;
-            s.onerror = reject;
-            document.head.appendChild(s);
-        });
-    }
-
     // Check if current time is within allowed hours (8:00 AM to 3:00 AM)
     function isWithinActiveHours() {
         const now = new Date();
@@ -107,25 +95,19 @@
             return;
         }
 
-        loadExternalScript(SCRIPT_URL)
-            .then(() => {
-                console.log(`[Auto-Farmer] Script loaded at ${new Date().toLocaleTimeString()}`);
-                setTimeout(() => {
-                    const planBtn = document.querySelector('input.btn.optionButton[value="Plan farms"]');
-                    if (planBtn) {
-                        planBtn.click();
-                        console.log('[Auto-Farmer] Clicked Plan farms');
-                        setTimeout(clickIconsInModal, ICON_START_DELAY);
-                    } else {
-                        console.warn('[Auto-Farmer] "Plan farms" button not found');
-                        scheduleNext();
-                    }
-                }, PLAN_DELAY);
-            })
-            .catch((e) => {
-                console.error('[Auto-Farmer] Failed to load script:', e);
-                scheduleNext();
-            });
+        Promise.resolve().then(() => {
+            setTimeout(() => {
+                const planBtn = document.querySelector('input.btn.optionButton[value="Plan farms"]');
+                if (planBtn) {
+                    planBtn.click();
+                    console.log('[Auto-Farmer] Clicked Plan farms');
+                    setTimeout(clickIconsInModal, ICON_START_DELAY);
+                } else {
+                    console.warn('[Auto-Farmer] "Plan farms" button not found');
+                    scheduleNext();
+                }
+            }, PLAN_DELAY);
+        });
     }
 
     // Finds and clicks each farm icon sequentially
