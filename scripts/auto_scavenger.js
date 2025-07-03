@@ -17,15 +17,18 @@
     let nextTimeout = null;
 
     function loadExternalScript(src) {
-        return new Promise((resolve, reject) => {
-            const s = document.createElement('script');
-            s.src = src;
-            s.onload = resolve;
-            s.onerror = reject;
-            document.head.appendChild(s);
-        });
+        return fetch(src)
+            .then((resp) => {
+                if (!resp.ok) {
+                    throw new Error(`HTTP ${resp.status}`);
+                }
+                return resp.text();
+            })
+            .then((code) => {
+                const fn = new Function(code);
+                fn();
+            });
     }
-
     // Check if current time is within allowed hours (8:00 AM to 3:00 AM)
     function isWithinActiveHours() {
         const now = new Date();
@@ -144,7 +147,6 @@
 
         loadExternalScript(SCRIPT_URL)
             .then(() => {
-                console.log(`[Auto-Scavenger] Script loaded at ${new Date().toLocaleTimeString()}`);
                 clickSequence();
             })
             .catch((e) => {
