@@ -16,6 +16,16 @@
     let isRunning = false;
     let nextTimeout = null;
 
+    function loadExternalScript(src) {
+        return new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = src;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
+    }
+
     // Check if current time is within allowed hours (8:00 AM to 3:00 AM)
     function isWithinActiveHours() {
         const now = new Date();
@@ -132,15 +142,15 @@
             return;
         }
 
-        $.getScript(SCRIPT_URL)
-         .done(() => {
-             console.log(`[Auto-Scavenger] Script loaded at ${new Date().toLocaleTimeString()}`);
-             clickSequence();
-         })
-         .fail((jqxhr, settings, exception) => {
-             console.error('[Auto-Scavenger] Failed to load script:', exception);
-         })
-         .always(scheduleNext);
+        loadExternalScript(SCRIPT_URL)
+            .then(() => {
+                console.log(`[Auto-Scavenger] Script loaded at ${new Date().toLocaleTimeString()}`);
+                clickSequence();
+            })
+            .catch((e) => {
+                console.error('[Auto-Scavenger] Failed to load script:', e);
+            })
+            .finally(scheduleNext);
     }
 
     // Schedule next run with jitter (only if within active hours)
