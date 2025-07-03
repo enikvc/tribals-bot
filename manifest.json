@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Tribals Bot",
+  "version": "1.0",
+  "description": "Bundle of Tribals automation scripts as a Chrome extension.",
+  "content_scripts": [
+    {
+      "matches": ["https://*.tribals.it/*mode=exchange*"],
+      "js": ["scripts/auto_buyer.js"]
+    },
+    {
+      "matches": ["https://*.tribals.it/game.php?*screen=am_farm*"],
+      "js": ["scripts/auto_farmer.js"]
+    },
+    {
+      "matches": ["https://*.tribals.it/game.php?village=*&screen=place&mode=scavenge_mass"],
+      "js": ["scripts/auto_scavenger.js"]
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["scripts/auto_sniper.js"]
+    }
+  ],
+  "permissions": []
+}

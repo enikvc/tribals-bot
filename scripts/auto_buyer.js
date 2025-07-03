@@ -1,13 +1,3 @@
-// ==UserScript==
-// @name         Tribals Premium Autobuyer
-// @namespace    http://tampermonkey.net/
-// @version      5.6
-// @description  Auto-buy premium resources with configurable thresholds, minimal emoji logs with ms precision (only between 8:00 and 03:00)
-// @match        https://*.tribals.it/*mode=exchange*
-// @grant        GM_registerMenuCommand
-// @grant        unsafeWindow
-// ==/UserScript==
-
 (function() {
   'use strict';
 

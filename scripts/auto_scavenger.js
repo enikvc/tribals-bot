@@ -1,12 +1,3 @@
-// ==UserScript==
-// @name         Tribals Auto Scavenger Humanized Runner
-// @namespace    http://tampermonkey.net/
-// @version      1.3.1
-// @description  Toggle to auto-load massScavenge.js, click buttons with random human-like delays, and randomize intervals (only between 8:00 and 03:00)
-// @match        https://*.tribals.it/game.php?village=*&screen=place&mode=scavenge_mass
-// @grant        none
-// ==/UserScript==
-
 (function() {
     'use strict';
 
