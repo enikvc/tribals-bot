@@ -19,16 +19,24 @@
     // Load an external script while respecting page CSP by fetching the
     // code and evaluating it directly to avoid CSP restrictions on <script>.
     function loadExternalScript(src) {
-        return fetch(src)
-            .then(r => r.text())
-            .then(code => {
-                try {
-                    new Function(code)();
-                    return Promise.resolve();
-                } catch (e) {
-                    return Promise.reject(e);
+        return new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage({ type: 'fetch-script', src }, (resp) => {
+                if (chrome.runtime.lastError) {
+                    reject(chrome.runtime.lastError);
+                    return;
+                }
+                if (resp && resp.code) {
+                    try {
+                        new Function(resp.code)();
+                        resolve();
+                    } catch (e) {
+                        reject(e);
+                    }
+                } else {
+                    reject(resp && resp.error);
                 }
             });
+        });
     }
 
     // Check if current time is within allowed hours (8:00 AM to 3:00 AM)
