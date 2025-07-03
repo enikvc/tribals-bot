@@ -14,6 +14,16 @@
     let isRunning = false;
     let nextTimeout = null;
 
+    function loadExternalScript(src) {
+        return new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = src;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
+    }
+
     // Check if current time is within allowed hours (8:00 AM to 3:00 AM)
     function isWithinActiveHours() {
         const now = new Date();
@@ -97,25 +107,25 @@
             return;
         }
 
-        $.getScript(SCRIPT_URL)
-         .done(() => {
-             console.log(`[Auto-Farmer] Script loaded at ${new Date().toLocaleTimeString()}`);
-             setTimeout(() => {
-                 const planBtn = document.querySelector('input.btn.optionButton[value="Plan farms"]');
-                 if (planBtn) {
-                     planBtn.click();
-                     console.log('[Auto-Farmer] Clicked Plan farms');
-                     setTimeout(clickIconsInModal, ICON_START_DELAY);
-                 } else {
-                     console.warn('[Auto-Farmer] "Plan farms" button not found');
-                     scheduleNext();
-                 }
-             }, PLAN_DELAY);
-         })
-         .fail((jqxhr, settings, exception) => {
-             console.error('[Auto-Farmer] Failed to load script:', exception);
-             scheduleNext();
-         });
+        loadExternalScript(SCRIPT_URL)
+            .then(() => {
+                console.log(`[Auto-Farmer] Script loaded at ${new Date().toLocaleTimeString()}`);
+                setTimeout(() => {
+                    const planBtn = document.querySelector('input.btn.optionButton[value="Plan farms"]');
+                    if (planBtn) {
+                        planBtn.click();
+                        console.log('[Auto-Farmer] Clicked Plan farms');
+                        setTimeout(clickIconsInModal, ICON_START_DELAY);
+                    } else {
+                        console.warn('[Auto-Farmer] "Plan farms" button not found');
+                        scheduleNext();
+                    }
+                }, PLAN_DELAY);
+            })
+            .catch((e) => {
+                console.error('[Auto-Farmer] Failed to load script:', e);
+                scheduleNext();
+            });
     }
 
     // Finds and clicks each farm icon sequentially
