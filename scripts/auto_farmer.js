@@ -3,12 +3,11 @@
 
     // ---- CONFIG ----
     const INTERVAL_SECONDS = 600;           // 15 minutes
-    const SCRIPT_URL = 'https://cdn.jsdelivr.net/gh/enikvc/tribals_it_scripts@refs/tags/1.2/farmgod.js';
     const PLAN_DELAY = 700;                 // ms after script load before clicking Plan farms
     const ICON_START_DELAY = 1000;          // ms after Plan farms click before selecting icons
-    const ICON_CLICK_INTERVAL = 527;       // ms between each farm icon click
-    const ACTIVE_START_HOUR = 2;            // 8:00 AM
-    const ACTIVE_END_HOUR = 2;              // 3:00 AM (next day)
+    const ICON_CLICK_INTERVAL = 527;        // ms between each farm icon click
+    const ACTIVE_START_HOUR = 8;            // 8:00 AM
+    const ACTIVE_END_HOUR = 3;              // 3:00 AM (next day)
     // ----------------
 
     let isRunning = false;
@@ -17,7 +16,12 @@
     function loadExternalScript(src) {
         return new Promise((resolve, reject) => {
             const s = document.createElement('script');
-            s.src = src;
+            // If it's the farmgod script, use the local vendor version
+            if (src.includes('farmgod.js')) {
+                s.src = chrome.runtime.getURL('vendor/farmgod.js');
+            } else {
+                s.src = src;
+            }
             s.onload = resolve;
             s.onerror = reject;
             document.head.appendChild(s);
@@ -107,7 +111,8 @@
             return;
         }
 
-        loadExternalScript(SCRIPT_URL)
+        // Use the local vendor version
+        loadExternalScript('farmgod.js')
             .then(() => {
                 console.log(`[Auto-Farmer] Script loaded at ${new Date().toLocaleTimeString()}`);
                 setTimeout(() => {

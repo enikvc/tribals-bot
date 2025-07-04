@@ -15,10 +15,12 @@
     {
       "matches": ["https://*.tribals.it/game.php?village=*&screen=place&mode=scavenge_mass"],
       "js": ["scripts/auto_scavenger.js"]
-    },
+    }
+  ],
+  "web_accessible_resources": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["scripts/auto_sniper.js"]
+      "resources": ["vendor/farmgod.js", "vendor/massScavenge.js"],
+      "matches": ["https://*.tribals.it/*"]
     }
   ],
   "permissions": []

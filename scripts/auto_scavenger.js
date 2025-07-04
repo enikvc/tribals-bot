@@ -4,13 +4,12 @@
     // ---- CONFIG ----
     const BASE_INTERVAL_SECONDS = 600;  // base interval between runs in seconds
     const INTERVAL_JITTER_SECONDS = 60; // jitter up to this many seconds
-    const SCRIPT_URL = 'https://shinko-to-kuma.com/scripts/massScavenge.js';
     const CLICK_MIN_DELAY = 200;   // minimum ms before first click
     const CLICK_MAX_DELAY = 800;   // maximum ms before first click
     const SECOND_CLICK_MIN = 300;  // minimum ms after first click
     const SECOND_CLICK_MAX = 1000; // maximum ms after first click
-    const ACTIVE_START_HOUR = 2;  // 8:00 AM
-    const ACTIVE_END_HOUR = 2;    // 3:00 AM (next day)
+    const ACTIVE_START_HOUR = 8;   // 8:00 AM
+    const ACTIVE_END_HOUR = 3;     // 3:00 AM (next day)
     // ----------------
 
     let isRunning = false;
@@ -19,7 +18,12 @@
     function loadExternalScript(src) {
         return new Promise((resolve, reject) => {
             const s = document.createElement('script');
-            s.src = src;
+            // If it's the massScavenge script, use the local vendor version
+            if (src.includes('massScavenge.js')) {
+                s.src = chrome.runtime.getURL('vendor/massScavenge.js');
+            } else {
+                s.src = src;
+            }
             s.onload = resolve;
             s.onerror = reject;
             document.head.appendChild(s);
@@ -142,7 +146,8 @@
             return;
         }
 
-        loadExternalScript(SCRIPT_URL)
+        // Use the local vendor version
+        loadExternalScript('massScavenge.js')
             .then(() => {
                 console.log(`[Auto-Scavenger] Script loaded at ${new Date().toLocaleTimeString()}`);
                 clickSequence();
