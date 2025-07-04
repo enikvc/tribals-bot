@@ -13,12 +13,16 @@ The scripts are located in the `scripts/` folder and are referenced from `manife
 ## Getting the external helpers
 
 Some of the automation relies on third‑party scripts. To keep them up to date,
-the repository includes an `update_externals.js` helper that downloads the
-required files into the `vendor/` directory. Run the following before loading
-the extension:
+the repository provides two small helpers that download the files into the
+`vendor/` directory. You can use either Node.js or a simple shell script before
+loading the extension:
 
 ```bash
+# with Node (requires Node.js 12+)
 node update_externals.js
+
+# or using curl/wget if Node isn't available
+./update_externals.sh
 ```
 
 If the files are missing, the extension will not be able to start.
