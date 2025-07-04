@@ -6,6 +6,7 @@ window.tribalsBot = {
   config: null,
   isActive: false,
   scriptName: null,
+  isDesignatedTab: false,
   
   // Initialize the bot for a specific script
   async init(scriptName) {
@@ -21,17 +22,33 @@ window.tribalsBot = {
     this.isActive = response.globalActive;
     this.activeStartHour = response.activeStartHour;
     this.activeEndHour = response.activeEndHour;
+    this.isDesignatedTab = response.isDesignatedTab;
+    
+    // If not the designated tab, don't initialize
+    if (!this.isDesignatedTab) {
+      console.log(`[${scriptName}] This is not the designated tab for this script. Script will not run.`);
+      return {
+        config: this.config,
+        isActive: false,
+        activeStartHour: this.activeStartHour,
+        activeEndHour: this.activeEndHour,
+        isDesignatedTab: false
+      };
+    }
     
     return {
       config: this.config,
       isActive: this.isActive,
       activeStartHour: this.activeStartHour,
-      activeEndHour: this.activeEndHour
+      activeEndHour: this.activeEndHour,
+      isDesignatedTab: true
     };
   },
   
   // Update script state
   async updateState(enabled) {
+    if (!this.isDesignatedTab) return;
+    
     await chrome.runtime.sendMessage({
       type: 'TOGGLE_SCRIPT',
       scriptName: this.scriptName,
@@ -41,6 +58,8 @@ window.tribalsBot = {
   
   // Update script config
   async updateConfig(configUpdate) {
+    if (!this.isDesignatedTab) return;
+    
     await chrome.runtime.sendMessage({
       type: 'UPDATE_SCRIPT_CONFIG',
       scriptName: this.scriptName,
@@ -83,6 +102,11 @@ window.tribalsBot = {
 
 // Listen for messages from background
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Only process messages if we're the designated tab
+  if (!window.tribalsBot.isDesignatedTab && request.type !== 'SCRIPT_STATE_CHANGED') {
+    return;
+  }
+  
   switch (request.type) {
     case 'SCRIPT_STATE_CHANGED':
       // Notify the page script if it's for this script
@@ -133,6 +157,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           isActive: request.isActive
         }
       }));
+      break;
+      
+    case 'DEBUG_RERUN_SCRIPT':
+      // Handle debug mode rerun
+      if (window.tribalsBot.scriptName === request.scriptName) {
+        window.dispatchEvent(new CustomEvent('tribalsbot:debugRerun', {
+          detail: { scriptName: request.scriptName }
+        }));
+      }
       break;
   }
 });

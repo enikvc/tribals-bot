@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Tribals Bot",
-  "version": "2.0",
-  "description": "Bundle of Tribals automation scripts with centralized scheduling.",
+  "version": "3.0",
+  "description": "Bundle of Tribals automation scripts with centralized scheduling and dedicated tabs.",
   "background": {
     "service_worker": "background.js"
   },
@@ -22,15 +22,15 @@
     },
     {
       "matches": ["https://*.tribals.it/*mode=exchange*"],
-      "js": ["scripts/auto_buyer_v2.js"]
+      "js": ["scripts/auto_buyer.js"]
     },
     {
       "matches": ["https://*.tribals.it/game.php?*screen=am_farm*"],
-      "js": ["scripts/auto_farmer_v2.js"]
+      "js": ["scripts/auto_farmer.js"]
     },
     {
-      "matches": ["https://*.tribals.it/game.php?village=*&screen=place&mode=scavenge_mass"],
-      "js": ["scripts/auto_scavenger_v2.js"]
+      "matches": ["https://*.tribals.it/game.php?*screen=place&mode=scavenge_mass*"],
+      "js": ["scripts/auto_scavenger.js"]
     }
   ],
   "web_accessible_resources": [
@@ -39,6 +39,6 @@
       "matches": ["https://*.tribals.it/*"]
     }
   ],
-  "permissions": ["storage"],
+  "permissions": ["storage", "tabs"],
   "host_permissions": ["https://*.tribals.it/*"]
 }

@@ -3,6 +3,18 @@
 
 let currentConfig = null;
 
+// Listen for script tab closed events
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === 'SCRIPT_TAB_CLOSED') {
+    // Update the toggle to reflect the script is now disabled
+    const toggleId = `${request.scriptName}Toggle`;
+    const toggle = document.getElementById(toggleId);
+    if (toggle) {
+      toggle.checked = false;
+    }
+  }
+});
+
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
   // Populate hour selects
@@ -54,6 +66,9 @@ function updateUI(response) {
   // Update hour selects
   document.getElementById('startHour').value = config.activeStartHour;
   document.getElementById('endHour').value = config.activeEndHour;
+  
+  // Update debug mode checkbox
+  document.getElementById('debugMode').checked = config.debugMode || false;
   
   // Update script toggles
   document.getElementById('autoBuyerToggle').checked = config.scripts.autoBuyer.enabled;
@@ -121,6 +136,20 @@ function setupEventListeners() {
     // Refresh UI
     const response = await chrome.runtime.sendMessage({ type: 'GET_CONFIG' });
     updateUI(response);
+  });
+  
+  // Debug mode toggle
+  document.getElementById('debugMode').addEventListener('change', async (e) => {
+    await chrome.runtime.sendMessage({
+      type: 'UPDATE_CONFIG',
+      config: {
+        debugMode: e.target.checked
+      }
+    });
+    
+    // Show notification about debug mode
+    const status = e.target.checked ? 'enabled' : 'disabled';
+    console.log(`Debug mode ${status}`);
   });
   
   // Script toggles
@@ -199,7 +228,9 @@ function getScriptSettings(scriptName) {
         baseIntervalSeconds: parseInt(document.getElementById('baseIntervalSeconds').value),
         intervalJitterSeconds: parseInt(document.getElementById('intervalJitterSeconds').value),
         clickMinDelay: parseInt(document.getElementById('clickMinDelay').value),
-        clickMaxDelay: parseInt(document.getElementById('clickMaxDelay').value)
+        clickMaxDelay: parseInt(document.getElementById('clickMaxDelay').value),
+        secondClickMin: parseInt(document.getElementById('secondClickMin').value),
+        secondClickMax: parseInt(document.getElementById('secondClickMax').value)
       };
   }
 }
