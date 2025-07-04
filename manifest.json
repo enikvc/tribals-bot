@@ -1,20 +1,36 @@
 {
   "manifest_version": 3,
   "name": "Tribals Bot",
-  "version": "1.0",
-  "description": "Bundle of Tribals automation scripts as a Chrome extension.",
+  "version": "2.0",
+  "description": "Bundle of Tribals automation scripts with centralized scheduling.",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
   "content_scripts": [
     {
+      "matches": ["https://*.tribals.it/*"],
+      "js": ["content-base.js"],
+      "run_at": "document_start"
+    },
+    {
       "matches": ["https://*.tribals.it/*mode=exchange*"],
-      "js": ["scripts/auto_buyer.js"]
+      "js": ["scripts/auto_buyer_v2.js"]
     },
     {
       "matches": ["https://*.tribals.it/game.php?*screen=am_farm*"],
-      "js": ["scripts/auto_farmer.js"]
+      "js": ["scripts/auto_farmer_v2.js"]
     },
     {
       "matches": ["https://*.tribals.it/game.php?village=*&screen=place&mode=scavenge_mass"],
-      "js": ["scripts/auto_scavenger.js"]
+      "js": ["scripts/auto_scavenger_v2.js"]
     }
   ],
   "web_accessible_resources": [
@@ -23,5 +39,6 @@
       "matches": ["https://*.tribals.it/*"]
     }
   ],
-  "permissions": []
+  "permissions": ["storage"],
+  "host_permissions": ["https://*.tribals.it/*"]
 }
