@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 350px;
+      min-height: 400px;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+    }
+    
+    .header {
+      background: #2c3e50;
+      color: white;
+      padding: 15px;
+      text-align: center;
+    }
+    
+    .header h1 {
+      margin: 0;
+      font-size: 18px;
+    }
+    
+    .status-bar {
+      background: #34495e;
+      color: white;
+      padding: 10px 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+    }
+    
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #e74c3c;
+    }
+    
+    .status-dot.active {
+      background: #2ecc71;
+    }
+    
+    .time-config {
+      background: white;
+      margin: 10px;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .time-config h3 {
+      margin: 0 0 10px 0;
+      font-size: 16px;
+      color: #2c3e50;
+    }
+    
+    .time-inputs {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    
+    .time-inputs label {
+      font-size: 13px;
+      color: #666;
+    }
+    
+    .time-inputs select {
+      padding: 5px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    
+    .scripts-container {
+      margin: 10px;
+    }
+    
+    .script-card {
+      background: white;
+      margin-bottom: 10px;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .script-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    
+    .script-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #2c3e50;
+    }
+    
+    .toggle-switch {
+      position: relative;
+      width: 44px;
+      height: 24px;
+    }
+    
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: .3s;
+      border-radius: 24px;
+    }
+    
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+    
+    input:checked + .toggle-slider {
+      background-color: #2ecc71;
+    }
+    
+    input:checked + .toggle-slider:before {
+      transform: translateX(20px);
+    }
+    
+    .script-settings {
+      font-size: 13px;
+      color: #666;
+      display: none;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #eee;
+    }
+    
+    .script-settings.visible {
+      display: block;
+    }
+    
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    
+    .setting-row input {
+      width: 80px;
+      padding: 4px 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 13px;
+      text-align: right;
+    }
+    
+    .expand-btn {
+      background: none;
+      border: none;
+      color: #3498db;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0;
+    }
+    
+    .expand-btn:hover {
+      text-decoration: underline;
+    }
+    
+    .save-btn {
+      background: #3498db;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      margin-top: 10px;
+      width: 100%;
+    }
+    
+    .save-btn:hover {
+      background: #2980b9;
+    }
+    
+    .next-active {
+      font-size: 12px;
+      color: #e74c3c;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Tribals Bot Control Panel</h1>
+  </div>
+  
+  <div class="status-bar">
+    <div class="status-indicator">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Inactive</span>
+    </div>
+    <span id="currentTime"></span>
+  </div>
+  
+  <div class="time-config">
+    <h3>Active Hours</h3>
+    <div class="time-inputs">
+      <label>From:</label>
+      <select id="startHour"></select>
+      <label>To:</label>
+      <select id="endHour"></select>
+      <button class="save-btn" id="saveHours" style="width: auto; margin: 0 0 0 10px;">Save</button>
+    </div>
+    <div class="next-active" id="nextActive"></div>
+  </div>
+  
+  <div class="scripts-container">
+    <div class="script-card">
+      <div class="script-header">
+        <span class="script-title">Auto Buyer</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="autoBuyerToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <button class="expand-btn" data-script="autoBuyer">Settings ▼</button>
+      <div class="script-settings" id="autoBuyerSettings">
+        <div class="setting-row">
+          <label>Min PP:</label>
+          <input type="number" id="minPP" value="3000">
+        </div>
+        <div class="setting-row">
+          <label>Min Stock:</label>
+          <input type="number" id="minStock" value="64">
+        </div>
+        <div class="setting-row">
+          <label>Post Buy Delay (ms):</label>
+          <input type="number" id="postBuyDelay" value="4800">
+        </div>
+        <button class="save-btn" data-script="autoBuyer">Save Settings</button>
+      </div>
+    </div>
+    
+    <div class="script-card">
+      <div class="script-header">
+        <span class="script-title">Auto Farmer</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="autoFarmerToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <button class="expand-btn" data-script="autoFarmer">Settings ▼</button>
+      <div class="script-settings" id="autoFarmerSettings">
+        <div class="setting-row">
+          <label>Interval (seconds):</label>
+          <input type="number" id="intervalSeconds" value="600">
+        </div>
+        <div class="setting-row">
+          <label>Plan Delay (ms):</label>
+          <input type="number" id="planDelay" value="700">
+        </div>
+        <div class="setting-row">
+          <label>Icon Start Delay (ms):</label>
+          <input type="number" id="iconStartDelay" value="1000">
+        </div>
+        <div class="setting-row">
+          <label>Icon Click Interval (ms):</label>
+          <input type="number" id="iconClickInterval" value="527">
+        </div>
+        <button class="save-btn" data-script="autoFarmer">Save Settings</button>
+      </div>
+    </div>
+    
+    <div class="script-card">
+      <div class="script-header">
+        <span class="script-title">Auto Scavenger</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="autoScavengerToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <button class="expand-btn" data-script="autoScavenger">Settings ▼</button>
+      <div class="script-settings" id="autoScavengerSettings">
+        <div class="setting-row">
+          <label>Base Interval (seconds):</label>
+          <input type="number" id="baseIntervalSeconds" value="600">
+        </div>
+        <div class="setting-row">
+          <label>Interval Jitter (seconds):</label>
+          <input type="number" id="intervalJitterSeconds" value="60">
+        </div>
+        <div class="setting-row">
+          <label>Click Min Delay (ms):</label>
+          <input type="number" id="clickMinDelay" value="200">
+        </div>
+        <div class="setting-row">
+          <label>Click Max Delay (ms):</label>
+          <input type="number" id="clickMaxDelay" value="800">
+        </div>
+        <button class="save-btn" data-script="autoScavenger">Save Settings</button>
+      </div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

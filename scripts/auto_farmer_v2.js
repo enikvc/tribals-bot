@@ -1,22 +1,60 @@
+// scripts/auto_farmer_v2.js
 (function() {
     'use strict';
 
-    // ---- CONFIG ----
-    const INTERVAL_SECONDS = 600;           // 15 minutes
-    const PLAN_DELAY = 700;                 // ms after script load before clicking Plan farms
-    const ICON_START_DELAY = 1000;          // ms after Plan farms click before selecting icons
-    const ICON_CLICK_INTERVAL = 527;        // ms between each farm icon click
-    const ACTIVE_START_HOUR = 8;            // 8:00 AM
-    const ACTIVE_END_HOUR = 3;              // 3:00 AM (next day)
-    // ----------------
-
+    let config = null;
     let isRunning = false;
     let nextTimeout = null;
+
+    async function init() {
+        const botConfig = await window.tribalsBot.init('autoFarmer');
+        config = botConfig.config;
+        
+        initPanel();
+        
+        // Check if should auto-start
+        if (config.enabled && window.tribalsBot.isWithinActiveHours()) {
+            toggle(true);
+        }
+        
+        // Listen for state changes
+        window.addEventListener('tribalsbot:stateChanged', (e) => {
+            const { enabled, isActive } = e.detail;
+            if (enabled && isActive && !isRunning) {
+                toggle(true);
+            } else if (!enabled && isRunning) {
+                toggle(false);
+            }
+        });
+        
+        // Listen for config updates
+        window.addEventListener('tribalsbot:configUpdated', (e) => {
+            config = e.detail.config;
+            console.log('[Auto-Farmer] Config updated');
+            updateInfoDisplay();
+        });
+        
+        // Listen for active status updates
+        window.addEventListener('tribalsbot:activeStatusUpdate', (e) => {
+            const { isActive } = e.detail;
+            updateTimeStatus();
+            
+            if (config.enabled) {
+                if (isActive && !isRunning) {
+                    console.log('[Auto-Farmer] Active hours started, resuming');
+                    toggle(true);
+                } else if (!isActive && isRunning) {
+                    console.log('[Auto-Farmer] Active hours ended, pausing');
+                    toggle(false);
+                    scheduleNextActiveCheck();
+                }
+            }
+        });
+    }
 
     function loadExternalScript(src) {
         return new Promise((resolve, reject) => {
             const s = document.createElement('script');
-            // If it's the farmgod script, use the local vendor version
             if (src.includes('farmgod.js')) {
                 s.src = chrome.runtime.getURL('vendor/farmgod.js');
             } else {
@@ -28,37 +66,6 @@
         });
     }
 
-    // Check if current time is within allowed hours (8:00 AM to 3:00 AM)
-    function isWithinActiveHours() {
-        const now = new Date();
-        const currentHour = now.getHours();
-
-        // Active from 8:00 AM to 3:00 AM (next day)
-        // This means: hour >= 8 OR hour < 3
-        return currentHour >= ACTIVE_START_HOUR || currentHour < ACTIVE_END_HOUR;
-    }
-
-    // Get time until next active period
-    function getTimeUntilActive() {
-        const now = new Date();
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-        const currentSecond = now.getSeconds();
-
-        if (isWithinActiveHours()) {
-            return 0; // Already in active period
-        }
-
-        // Inactive period is 3:00 AM to 8:00 AM
-        // Calculate seconds until 8:00 AM
-        const hoursUntil8AM = ACTIVE_START_HOUR - currentHour;
-        const minutesUntil8AM = -currentMinute;
-        const secondsUntil8AM = -currentSecond;
-
-        return (hoursUntil8AM * 3600) + (minutesUntil8AM * 60) + secondsUntil8AM;
-    }
-
-    // Initialize the control panel
     function initPanel() {
         const panel = document.createElement('div');
         Object.assign(panel.style, {
@@ -66,52 +73,53 @@
             padding: '10px', background: 'rgba(0,0,0,0.7)', color: '#fff',
             borderRadius: '5px', zIndex: 10000, fontFamily: 'sans-serif', textAlign: 'center'
         });
+        
         panel.innerHTML = `
             <div style="margin-bottom:8px; font-weight:bold;">Auto Farmer</div>
+            <div style="background:#3498db;color:white;padding:2px 6px;border-radius:3px;font-size:10px;margin-bottom:5px;">Managed by Tribals Bot</div>
             <div id="timeStatus" style="margin-bottom:8px; font-size:12px;"></div>
-            <button id="autoFarmToggle" style="padding:5px 10px;">Start</button>
+            <div id="farmerInfo" style="font-size:11px;color:#aaa;margin-bottom:8px;"></div>
         `;
+        
         document.body.appendChild(panel);
-        document.getElementById('autoFarmToggle').addEventListener('click', toggle);
+        
         updateTimeStatus();
-
-        // Update time status every minute
+        updateInfoDisplay();
         setInterval(updateTimeStatus, 60000);
     }
 
-    // Update the time status display
+    function updateInfoDisplay() {
+        const info = document.getElementById('farmerInfo');
+        if (info) {
+            info.innerHTML = `Interval: ${config.intervalSeconds}s<br>Status: ${config.enabled ? 'Enabled' : 'Disabled'}`;
+        }
+    }
+
     function updateTimeStatus() {
         const statusDiv = document.getElementById('timeStatus');
         const now = new Date();
         const timeStr = now.toLocaleTimeString();
 
-        if (isWithinActiveHours()) {
+        if (window.tribalsBot.isWithinActiveHours()) {
             statusDiv.innerHTML = `<span style="color:#2ecc71;">Active</span><br>${timeStr}`;
         } else {
-            const secondsUntil = getTimeUntilActive();
+            const secondsUntil = window.tribalsBot.getTimeUntilActive();
             const hoursUntil = Math.floor(secondsUntil / 3600);
             const minutesUntil = Math.floor((secondsUntil % 3600) / 60);
             statusDiv.innerHTML = `<span style="color:#e74c3c;">Inactive</span><br>${timeStr}<br>Active in ${hoursUntil}h ${minutesUntil}m`;
         }
     }
 
-    // Main run: loads script, clicks Plan farms, then farm icons
     function runFarming() {
-        // Check if we're still within active hours before running
-        if (!isWithinActiveHours()) {
+        if (!window.tribalsBot.isWithinActiveHours()) {
             console.log('[Auto-Farmer] Outside active hours, stopping...');
             if (isRunning) {
-                const btn = document.getElementById('autoFarmToggle');
-                isRunning = false;
-                btn.textContent = 'Start';
-                btn.style.background = '';
-                clearTimeout(nextTimeout);
+                toggle(false);
             }
             scheduleNextActiveCheck();
             return;
         }
 
-        // Use the local vendor version
         loadExternalScript('farmgod.js')
             .then(() => {
                 console.log(`[Auto-Farmer] Script loaded at ${new Date().toLocaleTimeString()}`);
@@ -120,12 +128,12 @@
                     if (planBtn) {
                         planBtn.click();
                         console.log('[Auto-Farmer] Clicked Plan farms');
-                        setTimeout(clickIconsInModal, ICON_START_DELAY);
+                        setTimeout(clickIconsInModal, config.iconStartDelay);
                     } else {
                         console.warn('[Auto-Farmer] "Plan farms" button not found');
                         scheduleNext();
                     }
-                }, PLAN_DELAY);
+                }, config.planDelay);
             })
             .catch((e) => {
                 console.error('[Auto-Farmer] Failed to load script:', e);
@@ -133,85 +141,81 @@
             });
     }
 
-    // Finds and clicks each farm icon sequentially
     function clickIconsInModal() {
         const container = document.querySelector('div.farmGodContent');
         const icons = container
             ? container.querySelectorAll('a.farmGod_icon.farm_icon.farm_icon_a')
             : document.querySelectorAll('a.farmGod_icon.farm_icon.farm_icon_a');
+        
         console.log(`[Auto-Farmer] Found ${icons.length} farm icons`);
+        
         if (icons.length === 0) {
             console.warn('[Auto-Farmer] No farm icons found to click');
             scheduleNext();
             return;
         }
+        
         icons.forEach((icon, idx) => {
             setTimeout(() => {
                 icon.click();
                 console.log(`[Auto-Farmer] Clicked farm icon #${idx+1} at ${new Date().toLocaleTimeString()}`);
                 if (idx === icons.length - 1) scheduleNext();
-            }, ICON_CLICK_INTERVAL * idx);
+            }, config.iconClickInterval * idx);
         });
     }
 
-    // Schedule next run (only if within active hours)
     function scheduleNext() {
         if (!isRunning) return;
 
-        if (!isWithinActiveHours()) {
-            console.log('[Auto-Farmer] Outside active hours, will resume at 8:00 AM');
+        if (!window.tribalsBot.isWithinActiveHours()) {
+            console.log('[Auto-Farmer] Outside active hours, will resume when active');
             scheduleNextActiveCheck();
             return;
         }
 
-        console.log(`[Auto-Farmer] Next run in ${INTERVAL_SECONDS} seconds`);
-        nextTimeout = setTimeout(runFarming, INTERVAL_SECONDS * 1000);
+        console.log(`[Auto-Farmer] Next run in ${config.intervalSeconds} seconds`);
+        nextTimeout = setTimeout(runFarming, config.intervalSeconds * 1000);
     }
 
-    // Schedule check for when active period begins
     function scheduleNextActiveCheck() {
-        const secondsUntil = getTimeUntilActive();
+        const secondsUntil = window.tribalsBot.getTimeUntilActive();
         if (secondsUntil > 0) {
             console.log(`[Auto-Farmer] Will check again in ${Math.floor(secondsUntil/60)} minutes`);
             nextTimeout = setTimeout(() => {
-                if (isRunning && isWithinActiveHours()) {
-                    runFarming();
+                if (config.enabled && window.tribalsBot.isWithinActiveHours()) {
+                    toggle(true);
                 } else {
                     scheduleNextActiveCheck();
                 }
-            }, Math.min(secondsUntil * 1000, 300000)); // Check at least every 5 minutes
+            }, Math.min(secondsUntil * 1000, 300000));
         }
     }
 
-    // Toggle start/stop
-    function toggle() {
-        const btn = document.getElementById('autoFarmToggle');
-        if (!isRunning) {
-            if (!isWithinActiveHours()) {
-                alert(`Auto Farmer is only active between ${ACTIVE_START_HOUR}:00 and ${ACTIVE_END_HOUR}:00. It will start automatically when the active period begins.`);
-            }
-            isRunning = true;
-            btn.textContent = 'Stop';
-            btn.style.background = '#e74c3c';
-
-            if (isWithinActiveHours()) {
+    function toggle(forceState = null) {
+        if (forceState !== null) {
+            isRunning = forceState;
+        } else {
+            isRunning = !isRunning;
+        }
+        
+        if (isRunning) {
+            console.log('[Auto-Farmer] Started');
+            if (window.tribalsBot.isWithinActiveHours()) {
                 runFarming();
             } else {
                 scheduleNextActiveCheck();
             }
         } else {
-            isRunning = false;
-            btn.textContent = 'Start';
-            btn.style.background = '';
-            clearTimeout(nextTimeout);
             console.log('[Auto-Farmer] Stopped');
+            clearTimeout(nextTimeout);
         }
+        
+        updateInfoDisplay();
     }
 
-    // On load, init panel
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initPanel);
+        document.addEventListener('DOMContentLoaded', init);
     } else {
-        initPanel();
+        init();
     }
 })();

@@ -1,39 +1,57 @@
+// scripts/auto_buyer_v2.js
 (function() {
   'use strict';
 
-  // ---- TIME CONFIG ----
-  const ACTIVE_START_HOUR = 8;  // 8:00 AM
-  const ACTIVE_END_HOUR = 2;    // 3:00 AM (next day)
-  // ---------------------
+  let config = null;
+  let running = false;
+  let attempts = 0;
+  let observer;
+  let nextActiveCheckTimeout;
 
-  // Check if current time is within allowed hours (8:00 AM to 3:00 AM)
-  function isWithinActiveHours() {
-    const now = new Date();
-    const currentHour = now.getHours();
-
-    // Active from 8:00 AM to 3:00 AM (next day)
-    // This means: hour >= 8 OR hour < 3
-    return currentHour >= ACTIVE_START_HOUR || currentHour < ACTIVE_END_HOUR;
-  }
-
-  // Get time until next active period
-  function getTimeUntilActive() {
-    const now = new Date();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    const currentSecond = now.getSeconds();
-
-    if (isWithinActiveHours()) {
-      return 0; // Already in active period
+  // Initialize
+  async function init() {
+    const botConfig = await window.tribalsBot.init('autoBuyer');
+    config = botConfig.config;
+    
+    createUI();
+    
+    // Check if should auto-start
+    if (config.enabled && window.tribalsBot.isWithinActiveHours()) {
+      startAutobuyer();
     }
-
-    // Inactive period is 3:00 AM to 8:00 AM
-    // Calculate seconds until 8:00 AM
-    const hoursUntil8AM = ACTIVE_START_HOUR - currentHour;
-    const minutesUntil8AM = -currentMinute;
-    const secondsUntil8AM = -currentSecond;
-
-    return (hoursUntil8AM * 3600) + (minutesUntil8AM * 60) + secondsUntil8AM;
+    
+    // Listen for state changes
+    window.addEventListener('tribalsbot:stateChanged', (e) => {
+      const { enabled, isActive } = e.detail;
+      if (enabled && isActive && !running) {
+        startAutobuyer();
+      } else if (!enabled && running) {
+        stopAutobuyer();
+      }
+    });
+    
+    // Listen for config updates
+    window.addEventListener('tribalsbot:configUpdated', (e) => {
+      config = e.detail.config;
+      log('⚙️', 'Config updated');
+    });
+    
+    // Listen for active status updates
+    window.addEventListener('tribalsbot:activeStatusUpdate', (e) => {
+      const { isActive } = e.detail;
+      updateTimeStatus();
+      
+      if (config.enabled) {
+        if (isActive && !running) {
+          log('🟢', 'Active hours started, resuming autobuyer');
+          startAutobuyer();
+        } else if (!isActive && running) {
+          log('⏰', 'Active hours ended, pausing autobuyer');
+          stopAutobuyer();
+          scheduleNextActiveCheck();
+        }
+      }
+    });
   }
 
   // Minimal logging with ms timestamps and emojis
@@ -44,14 +62,6 @@
   }
 
   const resources = ['wood', 'stone', 'iron'];
-  let minPP = 3000;
-  let minStock = 64;
-  let postBuyDelay = 4800;
-  let attempts = 0;
-  let observer;
-  let running = false;
-  let timeStatusInterval;
-  let nextActiveCheckTimeout;
 
   function dismissQuest() {
     const btn = document.querySelector('.quest-complete-btn');
@@ -68,7 +78,6 @@
     });
   }
 
-  // Update the time status display
   function updateTimeStatus() {
     const statusDiv = document.getElementById('timeStatus');
     if (!statusDiv) return;
@@ -76,30 +85,28 @@
     const now = new Date();
     const timeStr = now.toLocaleTimeString();
 
-    if (isWithinActiveHours()) {
+    if (window.tribalsBot.isWithinActiveHours()) {
       statusDiv.innerHTML = `<span style="color:#28a745;">Active</span><br>${timeStr}`;
     } else {
-      const secondsUntil = getTimeUntilActive();
+      const secondsUntil = window.tribalsBot.getTimeUntilActive();
       const hoursUntil = Math.floor(secondsUntil / 3600);
       const minutesUntil = Math.floor((secondsUntil % 3600) / 60);
       statusDiv.innerHTML = `<span style="color:#dc3545;">Inactive</span><br>${timeStr}<br>Active in ${hoursUntil}h ${minutesUntil}m`;
     }
   }
 
-  // Schedule check for when active period begins
   function scheduleNextActiveCheck() {
-    const secondsUntil = getTimeUntilActive();
+    const secondsUntil = window.tribalsBot.getTimeUntilActive();
     if (secondsUntil > 0) {
       log('⏰', `Will check again in ${Math.floor(secondsUntil/60)} minutes`);
       nextActiveCheckTimeout = setTimeout(() => {
-        if (running && isWithinActiveHours()) {
+        if (config.enabled && window.tribalsBot.isWithinActiveHours()) {
           log('🟢', 'Resuming autobuyer - now in active hours');
-          observeStocks();
-          handleMutation();
+          startAutobuyer();
         } else {
           scheduleNextActiveCheck();
         }
-      }, Math.min(secondsUntil * 1000, 300000)); // Check at least every 5 minutes
+      }, Math.min(secondsUntil * 1000, 300000));
     }
   }
 
@@ -111,7 +118,11 @@
       border: '1px solid #ccc', borderRadius: '4px', fontSize: '12px'
     });
 
-    // Time status display
+    const statusBadge = document.createElement('div');
+    statusBadge.style.cssText = 'background:#3498db;color:white;padding:2px 6px;border-radius:3px;font-size:10px;margin-bottom:5px;text-align:center;';
+    statusBadge.textContent = 'Managed by Tribals Bot';
+    c.appendChild(statusBadge);
+
     const timeStatus = document.createElement('div');
     timeStatus.id = 'timeStatus';
     timeStatus.style.marginBottom = '5px';
@@ -119,67 +130,27 @@
     timeStatus.style.fontSize = '11px';
     c.appendChild(timeStatus);
 
-    const btn = document.createElement('button');
-    btn.id = 'autoBuyerToggle';
-    btn.textContent = 'Start Autobuyer';
-    Object.assign(btn.style, { padding: '5px 10px', marginBottom: '5px', width: '100%', cursor: 'pointer' });
-    btn.style.background = '#28a745';
-    btn.addEventListener('click', () => {
-      if (!running) {
-        if (!isWithinActiveHours()) {
-          alert(`Premium Autobuyer is only active between ${ACTIVE_START_HOUR}:00 and ${ACTIVE_END_HOUR}:00. It will start automatically when the active period begins.`);
-        }
-        running = true;
-        btn.textContent = 'Stop Autobuyer';
-        btn.style.background = '#dc3545';
-        startAutobuyer();
-      } else {
-        running = false;
-        btn.textContent = 'Start Autobuyer';
-        btn.style.background = '#28a745';
-        stopAutobuyer();
-      }
-    });
-    c.appendChild(btn);
+    const info = document.createElement('div');
+    info.style.cssText = 'margin-top:5px;font-size:11px;color:#666;text-align:center;';
+    info.innerHTML = `PP: ≥${config.minPP}<br>Stock: ≥${config.minStock}<br>Delay: ${config.postBuyDelay}ms`;
+    c.appendChild(info);
 
-    function addInput(label, value, onChange) {
-      const l = document.createElement('label');
-      l.textContent = label;
-      l.style.display = 'block';
-      l.style.margin = '4px 0 2px';
-      c.appendChild(l);
-      const i = document.createElement('input');
-      i.type = 'number';
-      i.value = value;
-      i.style.width = '100%';
-      i.addEventListener('change', () => {
-        const v = parseInt(i.value, 10);
-        if (!isNaN(v) && v >= 0) {
-          onChange(v);
-          log('⚙️', `${label}=${v}`);
-        } else {
-          i.value = value;
-        }
-      });
-      c.appendChild(i);
-    }
-
-    addInput('minStock', minStock, v => minStock = v);
-    addInput('postBuyDelay', postBuyDelay, v => postBuyDelay = v);
     document.body.appendChild(c);
 
-    // Initialize time status and update every minute
     updateTimeStatus();
-    timeStatusInterval = setInterval(updateTimeStatus, 60000);
+    setInterval(updateTimeStatus, 60000);
 
-    log('⚙️', 'UI ready');
+    log('⚙️', 'UI ready (managed mode)');
   }
 
   function startAutobuyer() {
+    if (running) return;
+    
     attempts = 0;
+    running = true;
     log('🟢', 'Autobuyer started');
 
-    if (!isWithinActiveHours()) {
+    if (!window.tribalsBot.isWithinActiveHours()) {
       log('⏰', 'Outside active hours, will start when active period begins');
       scheduleNextActiveCheck();
       return;
@@ -191,6 +162,9 @@
   }
 
   function stopAutobuyer() {
+    if (!running) return;
+    
+    running = false;
     if (observer) observer.disconnect();
     if (nextActiveCheckTimeout) clearTimeout(nextActiveCheckTimeout);
     log('🔴', 'Autobuyer stopped');
@@ -199,9 +173,8 @@
   function handleMutation() {
     if (!running) return;
 
-    // Check if we're still within active hours
-    if (!isWithinActiveHours()) {
-      log('⏰', 'Outside active hours, pausing until 8:00 AM');
+    if (!window.tribalsBot.isWithinActiveHours()) {
+      log('⏰', 'Outside active hours, pausing until active period');
       if (observer) observer.disconnect();
       scheduleNextActiveCheck();
       return;
@@ -209,15 +182,11 @@
 
     dismissQuest();
     const pp = getPP();
-    if (pp < minPP) {
-      log('⚠️', `PP ${pp}<${minPP}, stopping`);
+    if (pp < config.minPP) {
+      log('⚠️', `PP ${pp}<${config.minPP}, stopping`);
       running = false;
       stopAutobuyer();
-      const btn = document.getElementById('autoBuyerToggle');
-      if (btn) {
-        btn.textContent = 'Start Autobuyer';
-        btn.style.background = '#28a745';
-      }
+      window.tribalsBot.updateState(false);
       return;
     }
 
@@ -225,12 +194,10 @@
       const stock = getStock(r);
       const rate = getRate(r);
       let amount = 0;
-      if (stock >= minStock) {
+      if (stock >= config.minStock) {
         if (stock >= rate) {
-          // full bundles only when meeting minStock
           amount = Math.floor(stock / rate) * rate;
         } else {
-          // remainder when stock < rate but >= minStock
           amount = stock;
           log('ℹ️', `${r}: stock<rate, using remainder ${amount}`);
         }
@@ -305,8 +272,7 @@
   function scheduleNext() {
     setTimeout(() => {
       if (running) {
-        // Check if still in active hours before continuing
-        if (isWithinActiveHours()) {
+        if (window.tribalsBot.isWithinActiveHours()) {
           observeStocks();
           handleMutation();
         } else {
@@ -314,12 +280,12 @@
           scheduleNextActiveCheck();
         }
       }
-    }, postBuyDelay);
+    }, config.postBuyDelay);
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', createUI);
+    document.addEventListener('DOMContentLoaded', init);
   } else {
-    createUI();
+    init();
   }
 })();
