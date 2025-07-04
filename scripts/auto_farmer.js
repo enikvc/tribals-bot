@@ -3,31 +3,29 @@
 
     // ---- CONFIG ----
     const INTERVAL_SECONDS = 600;           // 15 minutes
-    const SCRIPT_PATH = 'vendor/farmgod.js';
     const PLAN_DELAY = 700;                 // ms after script load before clicking Plan farms
     const ICON_START_DELAY = 1000;          // ms after Plan farms click before selecting icons
-    const ICON_CLICK_INTERVAL = 527;       // ms between each farm icon click
-    const ACTIVE_START_HOUR = 2;            // 8:00 AM
-    const ACTIVE_END_HOUR = 2;              // 3:00 AM (next day)
+    const ICON_CLICK_INTERVAL = 527;        // ms between each farm icon click
+    const ACTIVE_START_HOUR = 8;            // 8:00 AM
+    const ACTIVE_END_HOUR = 3;              // 3:00 AM (next day)
     // ----------------
 
     let isRunning = false;
     let nextTimeout = null;
 
-    // Load an external script while respecting page CSP by fetching the
-    // code and injecting it via a Blob URL which inherits the extension's
-    // origin. This avoids CSP restrictions on external scripts.
-    function loadVendorScript(path) {
-        return fetch(chrome.runtime.getURL(path))
-            .then(r => {
-                if (!r.ok) {
-                    throw new Error(`HTTP ${r.status}`);
-                }
-                return r.text();
-            })
-            .then(code => {
-                new Function(code)();
-            });
+    function loadExternalScript(src) {
+        return new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            // If it's the farmgod script, use the local vendor version
+            if (src.includes('farmgod.js')) {
+                s.src = chrome.runtime.getURL('vendor/farmgod.js');
+            } else {
+                s.src = src;
+            }
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
     }
 
     // Check if current time is within allowed hours (8:00 AM to 3:00 AM)
@@ -113,7 +111,8 @@
             return;
         }
 
-        loadVendorScript(SCRIPT_PATH)
+        // Use the local vendor version
+        loadExternalScript('farmgod.js')
             .then(() => {
                 console.log(`[Auto-Farmer] Script loaded at ${new Date().toLocaleTimeString()}`);
                 setTimeout(() => {
