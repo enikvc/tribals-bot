@@ -158,5 +158,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
       }));
       break;
+      
+    case 'DEBUG_RERUN_SCRIPT':
+      // Handle debug mode rerun
+      if (window.tribalsBot.scriptName === request.scriptName) {
+        window.dispatchEvent(new CustomEvent('tribalsbot:debugRerun', {
+          detail: { scriptName: request.scriptName }
+        }));
+      }
+      break;
   }
 });

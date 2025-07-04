@@ -67,6 +67,9 @@ function updateUI(response) {
   document.getElementById('startHour').value = config.activeStartHour;
   document.getElementById('endHour').value = config.activeEndHour;
   
+  // Update debug mode checkbox
+  document.getElementById('debugMode').checked = config.debugMode || false;
+  
   // Update script toggles
   document.getElementById('autoBuyerToggle').checked = config.scripts.autoBuyer.enabled;
   document.getElementById('autoFarmerToggle').checked = config.scripts.autoFarmer.enabled;
@@ -133,6 +136,20 @@ function setupEventListeners() {
     // Refresh UI
     const response = await chrome.runtime.sendMessage({ type: 'GET_CONFIG' });
     updateUI(response);
+  });
+  
+  // Debug mode toggle
+  document.getElementById('debugMode').addEventListener('change', async (e) => {
+    await chrome.runtime.sendMessage({
+      type: 'UPDATE_CONFIG',
+      config: {
+        debugMode: e.target.checked
+      }
+    });
+    
+    // Show notification about debug mode
+    const status = e.target.checked ? 'enabled' : 'disabled';
+    console.log(`Debug mode ${status}`);
   });
   
   // Script toggles

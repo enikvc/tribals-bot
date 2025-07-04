@@ -4,6 +4,7 @@
 const DEFAULT_CONFIG = {
   activeStartHour: 8,  // 8:00 AM
   activeEndHour: 3,    // 3:00 AM (next day)
+  debugMode: false,    // Debug mode - keeps tabs open
   scripts: {
     autoBuyer: {
       enabled: false,
@@ -16,7 +17,7 @@ const DEFAULT_CONFIG = {
       intervalSeconds: 600,
       planDelay: 700,
       iconStartDelay: 1000,
-      iconClickInterval: 527
+      iconClickInterval: 300  // 300ms = ~3.3 attacks per second (safe margin)
     },
     autoScavenger: {
       enabled: false,
@@ -49,6 +50,7 @@ const SCRIPT_URLS = {
 let config = { ...DEFAULT_CONFIG };
 let scriptTabs = new Map(); // Map scriptName -> tabId
 let tabScripts = new Map(); // Map tabId -> scriptName
+let reopenTimeouts = new Map(); // Map scriptName -> timeoutId
 
 // Load saved config on startup
 chrome.storage.local.get('config', (result) => {
@@ -107,10 +109,8 @@ async function openScriptTab(scriptName) {
   
   if (existingTabId) {
     try {
-      // Try to focus existing tab
-      await chrome.tabs.update(existingTabId, { active: true });
-      const tab = await chrome.tabs.get(existingTabId);
-      await chrome.windows.update(tab.windowId, { focused: true });
+      // Just verify the tab exists, don't focus it
+      await chrome.tabs.get(existingTabId);
       return existingTabId;
     } catch (e) {
       // Tab was closed, remove from maps
@@ -134,8 +134,8 @@ async function openScriptTab(scriptName) {
   // Create the URL for the script
   const url = SCRIPT_URLS[scriptName].createUrl(server);
   
-  // Create new tab
-  const tab = await chrome.tabs.create({ url, active: true });
+  // Create new tab in background (active: false)
+  const tab = await chrome.tabs.create({ url, active: false });
   
   // Store tab mapping
   scriptTabs.set(scriptName, tab.id);
@@ -165,15 +165,18 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     scriptTabs.delete(scriptName);
     tabScripts.delete(tabId);
     
-    // Update script state
-    config.scripts[scriptName].enabled = false;
-    saveConfig();
-    
-    // Notify popup if open
-    chrome.runtime.sendMessage({
-      type: 'SCRIPT_TAB_CLOSED',
-      scriptName
-    }).catch(() => {});
+    // Don't update state if it was a scheduled close
+    if (!reopenTimeouts.has(scriptName)) {
+      // Manual close - update script state
+      config.scripts[scriptName].enabled = false;
+      saveConfig();
+      
+      // Notify popup if open
+      chrome.runtime.sendMessage({
+        type: 'SCRIPT_TAB_CLOSED',
+        scriptName
+      }).catch(() => {});
+    }
   }
 });
 
@@ -194,21 +197,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'TOGGLE_SCRIPT':
       const { scriptName, enabled } = request;
       
+      // Clear any pending reopen if disabling
+      if (!enabled && reopenTimeouts.has(scriptName)) {
+        clearTimeout(reopenTimeouts.get(scriptName));
+        reopenTimeouts.delete(scriptName);
+      }
+      
       if (enabled) {
         // Open tab for the script
         openScriptTab(scriptName).then(tabId => {
           config.scripts[scriptName].enabled = true;
           saveConfig();
           
-          // Wait a bit for the tab to load, then notify
+          // Wait for tab to load, then notify only once
           setTimeout(() => {
-            chrome.tabs.sendMessage(tabId, {
-              type: 'SCRIPT_STATE_CHANGED',
-              scriptName,
-              enabled: true,
-              isActive: isWithinActiveHours()
-            }).catch(() => {});
-          }, 2000);
+            // Check if tab still exists before sending message
+            chrome.tabs.get(tabId, (tab) => {
+              if (chrome.runtime.lastError) {
+                console.log(`[Background] Tab ${tabId} no longer exists`);
+                return;
+              }
+              
+              chrome.tabs.sendMessage(tabId, {
+                type: 'SCRIPT_STATE_CHANGED',
+                scriptName,
+                enabled: true,
+                isActive: isWithinActiveHours()
+              }).catch(() => {
+                console.log(`[Background] Failed to send message to tab ${tabId}`);
+              });
+            });
+          }, 3000); // Increased delay to ensure page is fully loaded
         });
       } else {
         // Disable script and close tab
@@ -217,6 +236,48 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         closeScriptTab(scriptName);
       }
       
+      sendResponse({ success: true });
+      break;
+      
+    case 'SCHEDULE_SCRIPT_REOPEN':
+      // Handle scheduled tab close and reopen
+      const tabId = scriptTabs.get(request.scriptName);
+      if (tabId) {
+        // Check if debug mode is enabled
+        if (config.debugMode) {
+          console.log(`[Background] Debug mode ON - keeping ${request.scriptName} tab open`);
+          // Schedule rerun without closing tab
+          setTimeout(() => {
+            if (config.scripts[request.scriptName].enabled && isWithinActiveHours()) {
+              console.log(`[Background] Debug mode - triggering ${request.scriptName} rerun`);
+              chrome.tabs.sendMessage(tabId, {
+                type: 'DEBUG_RERUN_SCRIPT',
+                scriptName: request.scriptName
+              }).catch(() => {});
+            }
+          }, request.delaySeconds * 1000);
+        } else {
+          // Normal mode - close and reopen
+          // Clear any existing timeout
+          if (reopenTimeouts.has(request.scriptName)) {
+            clearTimeout(reopenTimeouts.get(request.scriptName));
+          }
+          
+          // Schedule reopening
+          const timeoutId = setTimeout(() => {
+            reopenTimeouts.delete(request.scriptName);
+            if (config.scripts[request.scriptName].enabled && isWithinActiveHours()) {
+              console.log(`[Background] Reopening ${request.scriptName} tab after ${request.delaySeconds}s delay`);
+              openScriptTab(request.scriptName);
+            }
+          }, request.delaySeconds * 1000);
+          
+          reopenTimeouts.set(request.scriptName, timeoutId);
+          
+          // Close the tab
+          chrome.tabs.remove(tabId).catch(() => {});
+        }
+      }
       sendResponse({ success: true });
       break;
       

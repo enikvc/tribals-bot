@@ -6,8 +6,15 @@
     let isRunning = false;
     let nextTimeout = null;
     let isDesignatedTab = false;
+    let isInitialized = false; // Prevent multiple initializations
 
     async function init() {
+        // Prevent multiple initializations
+        if (isInitialized) {
+            console.log('[Auto-Farmer] Already initialized, skipping...');
+            return;
+        }
+        
         const botConfig = await window.tribalsBot.init('autoFarmer');
         
         // Check if this is the designated tab
@@ -16,21 +23,35 @@
             return;
         }
         
+        isInitialized = true;
         isDesignatedTab = true;
         config = botConfig.config;
         
         initPanel();
         
-        // Check if should auto-start
-        if (config.enabled && window.tribalsBot.isWithinActiveHours()) {
-            toggle(true);
-        }
+        // Add human-like delay before auto-starting (2-5 seconds)
+        const startDelay = 2000 + Math.random() * 3000;
+        console.log(`[Auto-Farmer] Waiting ${Math.round(startDelay/1000)}s before starting...`);
+        
+        setTimeout(() => {
+            // Check if should auto-start
+            if (config.enabled && window.tribalsBot.isWithinActiveHours()) {
+                toggle(true);
+            }
+        }, startDelay);
         
         // Listen for state changes
         window.addEventListener('tribalsbot:stateChanged', (e) => {
             const { enabled, isActive } = e.detail;
             if (enabled && isActive && !isRunning) {
-                toggle(true);
+                // Add delay when manually enabled too
+                const delay = 1000 + Math.random() * 2000;
+                console.log('[Auto-Farmer] State changed to enabled, starting in', Math.round(delay/1000), 'seconds');
+                setTimeout(() => {
+                    if (!isRunning) { // Double check to prevent race conditions
+                        toggle(true);
+                    }
+                }, delay);
             } else if (!enabled && isRunning) {
                 toggle(false);
             }
@@ -57,6 +78,14 @@
                     toggle(false);
                     scheduleNextActiveCheck();
                 }
+            }
+        });
+        
+        // Listen for debug reruns
+        window.addEventListener('tribalsbot:debugRerun', (e) => {
+            console.log('[Auto-Farmer] Debug mode - rerunning script');
+            if (isRunning) {
+                runFarming();
             }
         });
     }
@@ -130,47 +159,108 @@
             return;
         }
 
-        loadExternalScript('farmgod.js')
-            .then(() => {
-                console.log(`[Auto-Farmer] Script loaded at ${new Date().toLocaleTimeString()}`);
-                setTimeout(() => {
-                    const planBtn = document.querySelector('input.btn.optionButton[value="Plan farms"]');
-                    if (planBtn) {
-                        planBtn.click();
-                        console.log('[Auto-Farmer] Clicked Plan farms');
-                        setTimeout(clickIconsInModal, config.iconStartDelay);
-                    } else {
-                        console.warn('[Auto-Farmer] "Plan farms" button not found');
-                        scheduleNext();
-                    }
-                }, config.planDelay);
-            })
-            .catch((e) => {
-                console.error('[Auto-Farmer] Failed to load script:', e);
-                scheduleNext();
-            });
+        // Add random delay before loading script (1-3 seconds)
+        const preLoadDelay = 1000 + Math.random() * 2000;
+        console.log(`[Auto-Farmer] Waiting ${Math.round(preLoadDelay/1000)}s before loading script...`);
+        
+        setTimeout(() => {
+            loadExternalScript('farmgod.js')
+                .then(() => {
+                    console.log(`[Auto-Farmer] Script loaded at ${new Date().toLocaleTimeString()}`);
+                    setTimeout(() => {
+                        const planBtn = document.querySelector('input.btn.optionButton[value="Plan farms"]');
+                        if (planBtn) {
+                            planBtn.click();
+                            console.log('[Auto-Farmer] Clicked Plan farms');
+                            // Wait longer and retry finding icons
+                            waitForIcons();
+                        } else {
+                            console.warn('[Auto-Farmer] "Plan farms" button not found');
+                            scheduleNext();
+                        }
+                    }, config.planDelay);
+                })
+                .catch((e) => {
+                    console.error('[Auto-Farmer] Failed to load script:', e);
+                    scheduleNext();
+                });
+        }, preLoadDelay);
     }
 
-    function clickIconsInModal() {
-        const container = document.querySelector('div.farmGodContent');
-        const icons = container
-            ? container.querySelectorAll('a.farmGod_icon.farm_icon.farm_icon_a')
-            : document.querySelectorAll('a.farmGod_icon.farm_icon.farm_icon_a');
+    function waitForIcons(attempts = 0) {
+        const maxAttempts = 10;
+        const retryDelay = 500;
         
-        console.log(`[Auto-Farmer] Found ${icons.length} farm icons`);
-        
-        if (icons.length === 0) {
-            console.warn('[Auto-Farmer] No farm icons found to click');
+        if (attempts >= maxAttempts) {
+            console.warn('[Auto-Farmer] Max attempts reached, no icons found');
             scheduleNext();
             return;
         }
+        
+        setTimeout(() => {
+            const icons = findFarmIcons();
+            
+            if (icons.length > 0) {
+                console.log(`[Auto-Farmer] Found ${icons.length} farm icons after ${attempts + 1} attempts`);
+                clickIconsInModal(icons);
+            } else {
+                console.log(`[Auto-Farmer] Attempt ${attempts + 1}/${maxAttempts}: No icons yet, retrying...`);
+                waitForIcons(attempts + 1);
+            }
+        }, attempts === 0 ? config.iconStartDelay : retryDelay);
+    }
+
+    function findFarmIcons() {
+        // Only look for icons inside the farmGodContent div
+        const farmGodContainer = document.querySelector('div.farmGodContent');
+        
+        if (!farmGodContainer) {
+            console.log('[Auto-Farmer] FarmGod container not found');
+            return [];
+        }
+        
+        // Look specifically for farmGod icons with the data attributes
+        const icons = farmGodContainer.querySelectorAll('a.farmGod_icon.farm_icon.farm_icon_a[data-origin][data-target][data-template]');
+        
+        if (icons.length === 0) {
+            // Try alternative selector if the first one doesn't work
+            const altIcons = farmGodContainer.querySelectorAll('td a.farm_icon_a');
+            return altIcons;
+        }
+        
+        return icons;
+    }
+
+    function clickIconsInModal(icons) {
+        if (!icons || icons.length === 0) {
+            console.warn('[Auto-Farmer] No farm icons to click');
+            scheduleNext();
+            return;
+        }
+        
+        // Calculate safe interval to avoid rate limit (5 attacks per second max)
+        // Using 250ms minimum interval = 4 attacks per second to be safe
+        const safeInterval = Math.max(config.iconClickInterval, 250);
+        
+        console.log(`[Auto-Farmer] Clicking ${icons.length} icons with ${safeInterval}ms interval`);
         
         icons.forEach((icon, idx) => {
             setTimeout(() => {
                 icon.click();
                 console.log(`[Auto-Farmer] Clicked farm icon #${idx+1} at ${new Date().toLocaleTimeString()}`);
-                if (idx === icons.length - 1) scheduleNext();
-            }, config.iconClickInterval * idx);
+                if (idx === icons.length - 1) {
+                    // Add a small delay after last click before closing tab
+                    setTimeout(() => {
+                        console.log('[Auto-Farmer] Run complete, closing tab...');
+                        // Notify background script to close tab and schedule reopening
+                        chrome.runtime.sendMessage({
+                            type: 'SCHEDULE_SCRIPT_REOPEN',
+                            scriptName: 'autoFarmer',
+                            delaySeconds: config.intervalSeconds
+                        });
+                    }, 1000);
+                }
+            }, safeInterval * idx);
         });
     }
 
@@ -183,8 +273,14 @@
             return;
         }
 
-        console.log(`[Auto-Farmer] Next run in ${config.intervalSeconds} seconds`);
-        nextTimeout = setTimeout(runFarming, config.intervalSeconds * 1000);
+        console.log(`[Auto-Farmer] Next run in ${config.intervalSeconds} seconds, closing tab...`);
+        
+        // Notify background to close tab and reopen after interval
+        chrome.runtime.sendMessage({
+            type: 'SCHEDULE_SCRIPT_REOPEN',
+            scriptName: 'autoFarmer',
+            delaySeconds: config.intervalSeconds
+        });
     }
 
     function scheduleNextActiveCheck() {
@@ -205,6 +301,11 @@
         if (!isDesignatedTab) return;
         
         if (forceState !== null) {
+            // Prevent toggling to same state
+            if (isRunning === forceState) {
+                console.log('[Auto-Farmer] Already in requested state:', forceState);
+                return;
+            }
             isRunning = forceState;
         } else {
             isRunning = !isRunning;
