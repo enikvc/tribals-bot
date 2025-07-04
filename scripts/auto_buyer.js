@@ -1,4 +1,4 @@
-// scripts/auto_buyer_v2.js
+// scripts/auto_buyer.js
 (function() {
   'use strict';
 
@@ -7,10 +7,19 @@
   let attempts = 0;
   let observer;
   let nextActiveCheckTimeout;
+  let isDesignatedTab = false;
 
   // Initialize
   async function init() {
     const botConfig = await window.tribalsBot.init('autoBuyer');
+    
+    // Check if this is the designated tab
+    if (!botConfig.isDesignatedTab) {
+      console.log('[Auto-Buyer] Not the designated tab, exiting...');
+      return;
+    }
+    
+    isDesignatedTab = true;
     config = botConfig.config;
     
     createUI();
@@ -25,7 +34,7 @@
       const { enabled, isActive } = e.detail;
       if (enabled && isActive && !running) {
         startAutobuyer();
-      } else if (!enabled && running) {
+      } else if (!enabled && isRunning) {
         stopAutobuyer();
       }
     });
@@ -122,6 +131,11 @@
     statusBadge.style.cssText = 'background:#3498db;color:white;padding:2px 6px;border-radius:3px;font-size:10px;margin-bottom:5px;text-align:center;';
     statusBadge.textContent = 'Managed by Tribals Bot';
     c.appendChild(statusBadge);
+    
+    const tabBadge = document.createElement('div');
+    tabBadge.style.cssText = 'background:#2ecc71;color:white;padding:2px 6px;border-radius:3px;font-size:10px;margin-bottom:5px;text-align:center;';
+    tabBadge.textContent = 'Auto Buyer Tab';
+    c.appendChild(tabBadge);
 
     const timeStatus = document.createElement('div');
     timeStatus.id = 'timeStatus';
@@ -144,7 +158,7 @@
   }
 
   function startAutobuyer() {
-    if (running) return;
+    if (running || !isDesignatedTab) return;
     
     attempts = 0;
     running = true;

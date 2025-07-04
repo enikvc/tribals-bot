@@ -3,6 +3,18 @@
 
 let currentConfig = null;
 
+// Listen for script tab closed events
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === 'SCRIPT_TAB_CLOSED') {
+    // Update the toggle to reflect the script is now disabled
+    const toggleId = `${request.scriptName}Toggle`;
+    const toggle = document.getElementById(toggleId);
+    if (toggle) {
+      toggle.checked = false;
+    }
+  }
+});
+
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
   // Populate hour selects
@@ -199,7 +211,9 @@ function getScriptSettings(scriptName) {
         baseIntervalSeconds: parseInt(document.getElementById('baseIntervalSeconds').value),
         intervalJitterSeconds: parseInt(document.getElementById('intervalJitterSeconds').value),
         clickMinDelay: parseInt(document.getElementById('clickMinDelay').value),
-        clickMaxDelay: parseInt(document.getElementById('clickMaxDelay').value)
+        clickMaxDelay: parseInt(document.getElementById('clickMaxDelay').value),
+        secondClickMin: parseInt(document.getElementById('secondClickMin').value),
+        secondClickMax: parseInt(document.getElementById('secondClickMax').value)
       };
   }
 }

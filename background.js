@@ -30,8 +30,25 @@ const DEFAULT_CONFIG = {
   }
 };
 
+// Script URL patterns
+const SCRIPT_URLS = {
+  autoFarmer: {
+    pattern: /https:\/\/it\d+\.tribals\.it\/game\.php\?.*screen=am_farm/,
+    createUrl: (server) => `https://${server}.tribals.it/game.php?village=300&screen=am_farm#`
+  },
+  autoScavenger: {
+    pattern: /https:\/\/it\d+\.tribals\.it\/game\.php\?.*screen=place&mode=scavenge_mass/,
+    createUrl: (server) => `https://${server}.tribals.it/game.php?village=300&screen=place&mode=scavenge_mass`
+  },
+  autoBuyer: {
+    pattern: /https:\/\/it\d+\.tribals\.it\/game\.php\?.*screen=market&mode=exchange/,
+    createUrl: (server) => `https://${server}.tribals.it/game.php?village=300&screen=market&mode=exchange`
+  }
+};
+
 let config = { ...DEFAULT_CONFIG };
-let activeTabStates = new Map(); // Track state per tab
+let scriptTabs = new Map(); // Map scriptName -> tabId
+let tabScripts = new Map(); // Map tabId -> scriptName
 
 // Load saved config on startup
 chrome.storage.local.get('config', (result) => {
@@ -45,16 +62,20 @@ function saveConfig() {
   chrome.storage.local.set({ config });
 }
 
+// Extract server from URL (e.g., "it94" from "https://it94.tribals.it/...")
+function getServerFromUrl(url) {
+  const match = url.match(/https:\/\/(it\d+)\.tribals\.it/);
+  return match ? match[1] : null;
+}
+
 // Check if current time is within allowed hours
 function isWithinActiveHours() {
   const now = new Date();
   const currentHour = now.getHours();
   
-  // Active from startHour to endHour (can cross midnight)
   if (config.activeStartHour < config.activeEndHour) {
     return currentHour >= config.activeStartHour && currentHour < config.activeEndHour;
   } else {
-    // Crosses midnight (e.g., 8 AM to 3 AM)
     return currentHour >= config.activeStartHour || currentHour < config.activeEndHour;
   }
 }
@@ -70,7 +91,6 @@ function getTimeUntilActive() {
     return 0;
   }
   
-  // Calculate hours until start time
   let hoursUntilStart = config.activeStartHour - currentHour;
   if (hoursUntilStart <= 0) {
     hoursUntilStart += 24;
@@ -79,6 +99,83 @@ function getTimeUntilActive() {
   const totalSeconds = (hoursUntilStart * 3600) - (currentMinute * 60) - currentSecond;
   return totalSeconds;
 }
+
+// Open or focus tab for a script
+async function openScriptTab(scriptName) {
+  // Check if tab already exists
+  const existingTabId = scriptTabs.get(scriptName);
+  
+  if (existingTabId) {
+    try {
+      // Try to focus existing tab
+      await chrome.tabs.update(existingTabId, { active: true });
+      const tab = await chrome.tabs.get(existingTabId);
+      await chrome.windows.update(tab.windowId, { focused: true });
+      return existingTabId;
+    } catch (e) {
+      // Tab was closed, remove from maps
+      scriptTabs.delete(scriptName);
+      tabScripts.delete(existingTabId);
+    }
+  }
+  
+  // Need to create new tab
+  // First, find an existing tribals tab to get the server
+  const tabs = await chrome.tabs.query({ url: "*://*.tribals.it/*" });
+  let server = "it94"; // Default server
+  
+  if (tabs.length > 0) {
+    const foundServer = getServerFromUrl(tabs[0].url);
+    if (foundServer) {
+      server = foundServer;
+    }
+  }
+  
+  // Create the URL for the script
+  const url = SCRIPT_URLS[scriptName].createUrl(server);
+  
+  // Create new tab
+  const tab = await chrome.tabs.create({ url, active: true });
+  
+  // Store tab mapping
+  scriptTabs.set(scriptName, tab.id);
+  tabScripts.set(tab.id, scriptName);
+  
+  return tab.id;
+}
+
+// Close tab for a script
+async function closeScriptTab(scriptName) {
+  const tabId = scriptTabs.get(scriptName);
+  if (tabId) {
+    try {
+      await chrome.tabs.remove(tabId);
+    } catch (e) {
+      // Tab already closed
+    }
+    scriptTabs.delete(scriptName);
+    tabScripts.delete(tabId);
+  }
+}
+
+// Clean up when tab is closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  const scriptName = tabScripts.get(tabId);
+  if (scriptName) {
+    scriptTabs.delete(scriptName);
+    tabScripts.delete(tabId);
+    
+    // Update script state
+    config.scripts[scriptName].enabled = false;
+    saveConfig();
+    
+    // Notify popup if open
+    chrome.runtime.sendMessage({
+      type: 'SCRIPT_TAB_CLOSED',
+      scriptName
+    }).catch(() => {});
+  }
+});
 
 // Message handler for communication with content scripts and popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -96,17 +193,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       
     case 'TOGGLE_SCRIPT':
       const { scriptName, enabled } = request;
-      config.scripts[scriptName].enabled = enabled;
-      saveConfig();
       
-      // Notify the relevant tab
-      if (sender.tab) {
-        chrome.tabs.sendMessage(sender.tab.id, {
-          type: 'SCRIPT_STATE_CHANGED',
-          scriptName,
-          enabled,
-          isActive: isWithinActiveHours()
+      if (enabled) {
+        // Open tab for the script
+        openScriptTab(scriptName).then(tabId => {
+          config.scripts[scriptName].enabled = true;
+          saveConfig();
+          
+          // Wait a bit for the tab to load, then notify
+          setTimeout(() => {
+            chrome.tabs.sendMessage(tabId, {
+              type: 'SCRIPT_STATE_CHANGED',
+              scriptName,
+              enabled: true,
+              isActive: isWithinActiveHours()
+            }).catch(() => {});
+          }, 2000);
         });
+      } else {
+        // Disable script and close tab
+        config.scripts[scriptName].enabled = false;
+        saveConfig();
+        closeScriptTab(scriptName);
       }
       
       sendResponse({ success: true });
@@ -120,13 +228,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       break;
       
     case 'GET_SCRIPT_CONFIG':
-      const scriptConfig = config.scripts[request.scriptName];
-      sendResponse({ 
-        config: scriptConfig,
-        globalActive: isWithinActiveHours(),
-        activeStartHour: config.activeStartHour,
-        activeEndHour: config.activeEndHour
-      });
+      // Check if this tab is the designated tab for the script
+      const scriptForTab = tabScripts.get(sender.tab.id);
+      
+      if (scriptForTab === request.scriptName) {
+        const scriptConfig = config.scripts[request.scriptName];
+        sendResponse({ 
+          config: scriptConfig,
+          globalActive: isWithinActiveHours(),
+          activeStartHour: config.activeStartHour,
+          activeEndHour: config.activeEndHour,
+          isDesignatedTab: true
+        });
+      } else {
+        // Not the designated tab for this script
+        sendResponse({ 
+          config: config.scripts[request.scriptName],
+          globalActive: isWithinActiveHours(),
+          activeStartHour: config.activeStartHour,
+          activeEndHour: config.activeEndHour,
+          isDesignatedTab: false
+        });
+      }
       break;
       
     case 'UPDATE_SCRIPT_CONFIG':
@@ -136,13 +259,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       };
       saveConfig();
       
-      // Notify the content script
-      if (sender.tab) {
-        chrome.tabs.sendMessage(sender.tab.id, {
+      // Notify the designated tab for this script
+      const designatedTabId = scriptTabs.get(request.scriptName);
+      if (designatedTabId) {
+        chrome.tabs.sendMessage(designatedTabId, {
           type: 'CONFIG_UPDATED',
           scriptName: request.scriptName,
           config: config.scripts[request.scriptName]
-        });
+        }).catch(() => {});
       }
       
       sendResponse({ success: true });
@@ -152,19 +276,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true; // Keep message channel open for async responses
 });
 
-// Broadcast config updates to all tabs
+// Broadcast config updates to designated tabs only
 function broadcastConfigUpdate() {
-  chrome.tabs.query({}, (tabs) => {
-    tabs.forEach(tab => {
-      if (tab.url && tab.url.includes('tribals.it')) {
-        chrome.tabs.sendMessage(tab.id, {
-          type: 'GLOBAL_CONFIG_UPDATED',
-          config,
-          isActive: isWithinActiveHours()
-        }).catch(() => {
-          // Tab might not have content script loaded
-        });
-      }
+  scriptTabs.forEach((tabId, scriptName) => {
+    chrome.tabs.sendMessage(tabId, {
+      type: 'GLOBAL_CONFIG_UPDATED',
+      config,
+      isActive: isWithinActiveHours()
+    }).catch(() => {
+      // Tab might not have content script loaded
     });
   });
 }
@@ -173,16 +293,12 @@ function broadcastConfigUpdate() {
 setInterval(() => {
   const isActive = isWithinActiveHours();
   
-  chrome.tabs.query({ url: '*://*.tribals.it/*' }, (tabs) => {
-    tabs.forEach(tab => {
-      chrome.tabs.sendMessage(tab.id, {
-        type: 'ACTIVE_STATUS_UPDATE',
-        isActive,
-        timeUntilActive: getTimeUntilActive()
-      }).catch(() => {
-        // Tab might not have content script loaded
-      });
-    });
+  scriptTabs.forEach((tabId, scriptName) => {
+    chrome.tabs.sendMessage(tabId, {
+      type: 'ACTIVE_STATUS_UPDATE',
+      isActive,
+      timeUntilActive: getTimeUntilActive()
+    }).catch(() => {});
   });
 }, 60000); // Check every minute
 

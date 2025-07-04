@@ -1,13 +1,22 @@
-// scripts/auto_farmer_v2.js
+// scripts/auto_farmer.js
 (function() {
     'use strict';
 
     let config = null;
     let isRunning = false;
     let nextTimeout = null;
+    let isDesignatedTab = false;
 
     async function init() {
         const botConfig = await window.tribalsBot.init('autoFarmer');
+        
+        // Check if this is the designated tab
+        if (!botConfig.isDesignatedTab) {
+            console.log('[Auto-Farmer] Not the designated tab, exiting...');
+            return;
+        }
+        
+        isDesignatedTab = true;
         config = botConfig.config;
         
         initPanel();
@@ -77,6 +86,7 @@
         panel.innerHTML = `
             <div style="margin-bottom:8px; font-weight:bold;">Auto Farmer</div>
             <div style="background:#3498db;color:white;padding:2px 6px;border-radius:3px;font-size:10px;margin-bottom:5px;">Managed by Tribals Bot</div>
+            <div style="background:#2ecc71;color:white;padding:2px 6px;border-radius:3px;font-size:10px;margin-bottom:5px;">Auto Farmer Tab</div>
             <div id="timeStatus" style="margin-bottom:8px; font-size:12px;"></div>
             <div id="farmerInfo" style="font-size:11px;color:#aaa;margin-bottom:8px;"></div>
         `;
@@ -111,8 +121,8 @@
     }
 
     function runFarming() {
-        if (!window.tribalsBot.isWithinActiveHours()) {
-            console.log('[Auto-Farmer] Outside active hours, stopping...');
+        if (!isDesignatedTab || !window.tribalsBot.isWithinActiveHours()) {
+            console.log('[Auto-Farmer] Outside active hours or not designated tab, stopping...');
             if (isRunning) {
                 toggle(false);
             }
@@ -165,7 +175,7 @@
     }
 
     function scheduleNext() {
-        if (!isRunning) return;
+        if (!isRunning || !isDesignatedTab) return;
 
         if (!window.tribalsBot.isWithinActiveHours()) {
             console.log('[Auto-Farmer] Outside active hours, will resume when active');
@@ -192,6 +202,8 @@
     }
 
     function toggle(forceState = null) {
+        if (!isDesignatedTab) return;
+        
         if (forceState !== null) {
             isRunning = forceState;
         } else {
