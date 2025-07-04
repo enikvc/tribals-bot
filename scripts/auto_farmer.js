@@ -3,7 +3,7 @@
 
     // ---- CONFIG ----
     const INTERVAL_SECONDS = 600;           // 15 minutes
-    const SCRIPT_URL = 'https://cdn.jsdelivr.net/gh/enikvc/tribals_it_scripts@refs/tags/1.2/farmgod.js';
+    const SCRIPT_PATH = 'vendor/farmgod.js';
     const PLAN_DELAY = 700;                 // ms after script load before clicking Plan farms
     const ICON_START_DELAY = 1000;          // ms after Plan farms click before selecting icons
     const ICON_CLICK_INTERVAL = 527;       // ms between each farm icon click
@@ -17,25 +17,17 @@
     // Load an external script while respecting page CSP by fetching the
     // code and injecting it via a Blob URL which inherits the extension's
     // origin. This avoids CSP restrictions on external scripts.
-    function loadExternalScript(src) {
-        return new Promise((resolve, reject) => {
-            chrome.runtime.sendMessage({ type: 'fetch-script', src }, (resp) => {
-                if (chrome.runtime.lastError) {
-                    reject(chrome.runtime.lastError);
-                    return;
+    function loadVendorScript(path) {
+        return fetch(chrome.runtime.getURL(path))
+            .then(r => {
+                if (!r.ok) {
+                    throw new Error(`HTTP ${r.status}`);
                 }
-                if (resp && resp.code) {
-                    try {
-                        new Function(resp.code)();
-                        resolve();
-                    } catch (e) {
-                        reject(e);
-                    }
-                } else {
-                    reject(resp && resp.error);
-                }
+                return r.text();
+            })
+            .then(code => {
+                new Function(code)();
             });
-        });
     }
 
     // Check if current time is within allowed hours (8:00 AM to 3:00 AM)
@@ -121,7 +113,7 @@
             return;
         }
 
-        loadExternalScript(SCRIPT_URL)
+        loadVendorScript(SCRIPT_PATH)
             .then(() => {
                 console.log(`[Auto-Farmer] Script loaded at ${new Date().toLocaleTimeString()}`);
                 setTimeout(() => {

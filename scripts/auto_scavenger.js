@@ -4,7 +4,7 @@
     // ---- CONFIG ----
     const BASE_INTERVAL_SECONDS = 600;  // base interval between runs in seconds
     const INTERVAL_JITTER_SECONDS = 60; // jitter up to this many seconds
-    const SCRIPT_URL = 'https://shinko-to-kuma.com/scripts/massScavenge.js';
+    const SCRIPT_PATH = 'vendor/massScavenge.js';
     const CLICK_MIN_DELAY = 200;   // minimum ms before first click
     const CLICK_MAX_DELAY = 800;   // maximum ms before first click
     const SECOND_CLICK_MIN = 300;  // minimum ms after first click
@@ -16,27 +16,18 @@
     let isRunning = false;
     let nextTimeout = null;
 
-    // Load an external script while respecting page CSP by fetching the
-    // code and evaluating it directly to avoid CSP restrictions on <script>.
-    function loadExternalScript(src) {
-        return new Promise((resolve, reject) => {
-            chrome.runtime.sendMessage({ type: 'fetch-script', src }, (resp) => {
-                if (chrome.runtime.lastError) {
-                    reject(chrome.runtime.lastError);
-                    return;
+    // Load a vendor script packaged with the extension and execute it.
+    function loadVendorScript(path) {
+        return fetch(chrome.runtime.getURL(path))
+            .then(r => {
+                if (!r.ok) {
+                    throw new Error(`HTTP ${r.status}`);
                 }
-                if (resp && resp.code) {
-                    try {
-                        new Function(resp.code)();
-                        resolve();
-                    } catch (e) {
-                        reject(e);
-                    }
-                } else {
-                    reject(resp && resp.error);
-                }
+                return r.text();
+            })
+            .then(code => {
+                new Function(code)();
             });
-        });
     }
 
     // Check if current time is within allowed hours (8:00 AM to 3:00 AM)
@@ -155,7 +146,7 @@
             return;
         }
 
-        loadExternalScript(SCRIPT_URL)
+        loadVendorScript(SCRIPT_PATH)
             .then(() => {
                 console.log(`[Auto-Scavenger] Script loaded at ${new Date().toLocaleTimeString()}`);
                 clickSequence();

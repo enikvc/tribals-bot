@@ -10,6 +10,19 @@ This project bundles multiple automation scripts originally for Tampermonkey int
 
 The scripts are located in the `scripts/` folder and are referenced from `manifest.json`.
 
+## Getting the external helpers
+
+Some of the automation relies on third‑party scripts. To keep them up to date,
+the repository includes an `update_externals.js` helper that downloads the
+required files into the `vendor/` directory. Run the following before loading
+the extension:
+
+```bash
+node update_externals.js
+```
+
+If the files are missing, the extension will not be able to start.
+
 ## Installing the extension
 1. Open `chrome://extensions/` in your browser.
 2. Enable “Developer mode”.
