@@ -1,0 +1,121 @@
+# Global Configuration
+active_hours:
+  start: 8  # 8:00 AM
+  end: 3    # 3:00 AM (next day)
+
+debug_mode: false
+discord_webhook: ""
+
+# Server Configuration
+server:
+  base_url: "https://it94.tribals.it"
+  login_url: "https://www.tribals.it"
+  village_id: 306  # Your village ID
+  
+# Browser Configuration
+browser:
+  headless: false
+  slow_mo: 0
+  user_data_dir: "./browser_data"
+  viewport:
+    width: 1440
+    height: 720
+  # Authentic Chrome settings
+  chrome_version: "138"
+  platform: "macOS"
+  
+# Anti-Detection Configuration
+anti_detection:
+  enabled: true
+  random_user_agents: false  # Use specific UA for your session
+  simulate_human_behavior: true
+  random_breaks:
+    enabled: true
+    min_duration: 60  # seconds
+    max_duration: 600  # seconds
+    frequency: 0.1  # chance per hour
+  mouse_movement:
+    natural_curves: true
+    random_movements: true
+    movement_before_actions: 0.3  # 30% chance
+  typing:
+    variable_speed: true
+    typo_chance: 0.01  # 1% chance
+    thinking_pauses: true
+  reading:
+    simulate_reading: true
+    words_per_minute_min: 200
+    words_per_minute_max: 300
+  fatigue:
+    enabled: true
+    multiplier_per_hour: 0.1  # 10% slower per hour
+  network:
+    random_referer: true
+    authentic_headers: true
+    cache_behavior: true
+
+# Session Configuration
+session:
+  cookies:
+    # These will be set automatically after login
+    cid: ""
+    locale: "it_IT"
+    mobile_mapsize: "14x16"
+    global_village_id: "306"
+    websocket_available: "true"
+  
+# Automation Scripts Configuration
+scripts:
+  auto_buyer:
+    enabled: false
+    min_pp: 3000
+    min_stock: 64
+    post_buy_delay: 4800
+    check_interval: 5000
+    
+  auto_farmer:
+    enabled: true
+    interval_seconds: 600
+    plan_delay: 700
+    icon_start_delay: 1000
+    icon_click_interval: 300
+    max_icons_per_run: 50
+    
+  auto_scavenger:
+    enabled: true
+    base_interval_seconds: 600
+    interval_jitter_seconds: 60
+    click_min_delay: 200
+    click_max_delay: 800
+    
+
+# Captcha Configuration
+captcha:
+  max_retries: 2  # Reduced to fail faster on multi-challenge
+  solver_timeout: 300  # 5 minutes for manual solving
+  detection_interval: 2000
+  response_timeout: 180  # 3 minutes for auto solving
+  screenshot_timeout: 60  # 1 minute for screenshots
+  auto_solve_enabled: true  # Set to false to always use manual
+  
+# Logging Configuration
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "tribals_bot.log"
+  
+# Request Configuration
+request:
+  headers:
+    # These headers will be used for all requests
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+    Accept-Language: "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
+    Accept-Encoding: "gzip, deflate, br, zstd"
+    Cache-Control: "no-cache"
+    Pragma: "no-cache"
+    Sec-CH-UA: '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"'
+    Sec-CH-UA-Mobile: "?0"
+    Sec-CH-UA-Platform: '"macOS"'
+  timeout: 30000  # 30 seconds
+  retry_attempts: 3
+  retry_delay: 1000  # 1 second
