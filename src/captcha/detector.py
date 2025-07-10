@@ -61,16 +61,25 @@ class CaptchaDetector:
                 # Check all pages for captcha/bot protection
                 for source_name, page in all_pages:
                     try:
-                        # Check for bot protection page
+                        # Check for bot protection page (with start button)
                         if await self.check_for_bot_protection(page):
-                            logger.warning(f"🚨 Bot protection detected on {source_name} page")
+                            logger.warning(f"🚨 Bot protection page detected on {source_name}")
                             await self.handle_bot_protection(source_name, page)
                             break  # Handle one at a time
-                        # Check for captcha
-                        elif await self.check_page_for_captcha(page):
+                            
+                        # Check for bot protection quest specifically
+                        quest_element = await page.query_selector('#botprotection_quest')
+                        if quest_element:
+                            logger.warning(f"🚨 Bot protection quest detected on {source_name}")
+                            await self.handle_bot_protection(source_name, page)
+                            break  # Handle one at a time
+                            
+                        # Check for other types of captcha (not bot protection)
+                        if await self.check_page_for_captcha(page):
                             logger.warning(f"🚨 Captcha detected on {source_name} page")
                             await self.handle_captcha_detection(source_name, page)
                             break  # Handle one at a time
+                            
                     except Exception as e:
                         logger.debug(f"Error checking page {source_name}: {e}")
                         continue
@@ -87,7 +96,7 @@ class CaptchaDetector:
         logger.info("👁️ Stopped captcha monitoring")
         
     async def check_for_bot_protection(self, page: Page) -> bool:
-        """Check if bot protection page is shown"""
+        """Check if bot protection page is shown (with start button)"""
         # Don't check if we're already handling it
         if self.detected_captcha:
             return False
@@ -100,9 +109,15 @@ class CaptchaDetector:
                 start_button = await page.query_selector('td.bot-protection-row a.btn.btn-default')
                 if start_button:
                     button_text = await start_button.text_content()
-                    if button_text and 'Inizio del controllo' in button_text:
-                        logger.warning("🚨 Bot protection page detected with start button!")
+                    if button_text and ('Inizio del controllo' in button_text or 'Start' in button_text):
+                        logger.debug("Bot protection page with start button detected")
                         return True
+                        
+                # Also check if there's an active captcha in bot protection
+                captcha_div = await page.query_selector('td.bot-protection-row .captcha')
+                if captcha_div:
+                    logger.debug("Bot protection with active captcha detected")
+                    return True
                         
             return False
             
@@ -111,47 +126,44 @@ class CaptchaDetector:
             return False
         
     async def check_page_for_captcha(self, page: Page) -> bool:
-        """Check if page has captcha"""
+        """Check if page has captcha (excluding bot protection)"""
         try:
-            # Check for bot protection quest (Tribals specific)
-            quest_selector = '#botprotection_quest[data-title="Protezione bot"]'
-            quest_element = await page.query_selector(quest_selector)
-            if quest_element:
-                logger.warning("🚨 Bot protection quest detected!")
-                return True
-                
-            # Check for captcha page block (without the start button)
-            block_selector = 'td.bot-protection-row h2'
-            block_element = await page.query_selector(block_selector)
-            if block_element:
-                text = await block_element.text_content()
-                if text and 'Protezione bot' in text:
-                    # Check if there's NO start button (captcha is active)
-                    start_button = await page.query_selector('td.bot-protection-row a.btn.btn-default')
-                    if not start_button:
-                        logger.warning("🚨 Bot protection captcha active!")
-                        return True
-                    
-            # Check for hCaptcha iframe
+            # Note: Bot protection quest is now handled separately in the monitoring loop
+            # This function only checks for other types of captcha
+            
+            # Check for hCaptcha iframe (generic captcha)
             captcha_selectors = [
                 '.h-captcha',
                 'iframe[src*="hcaptcha"]',
                 'div[id*="hcaptcha"]',
-                '[data-hcaptcha-widget-id]',
-                'td.bot-protection-row .captcha .h-captcha'  # Specific to bot protection
+                '[data-hcaptcha-widget-id]'
             ]
             
             for selector in captcha_selectors:
                 element = await page.query_selector(selector)
                 if element:
                     try:
-                        if await element.is_visible():
-                            logger.warning(f"🚨 Captcha detected via {selector}")
-                            return True
+                        # Make sure it's not inside bot protection
+                        parent = await element.evaluate("""
+                            (el) => {
+                                let parent = el;
+                                for (let i = 0; i < 5; i++) {
+                                    parent = parent.parentElement;
+                                    if (!parent) break;
+                                    if (parent.classList.contains('bot-protection-row')) {
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            }
+                        """)
+                        
+                        if not parent:  # Not inside bot protection
+                            if await element.is_visible():
+                                logger.debug(f"Generic captcha detected via {selector}")
+                                return True
                     except:
-                        # Element might be in iframe
-                        logger.warning(f"🚨 Captcha detected via {selector} (in iframe)")
-                        return True
+                        pass
                         
         except Exception as e:
             logger.debug(f"Error checking for captcha: {e}")
@@ -159,12 +171,12 @@ class CaptchaDetector:
         return False
         
     async def handle_bot_protection(self, source_name: str, page: Page):
-        """Handle bot protection page"""
+        """Handle bot protection (both page and quest)"""
         if self.detected_captcha:
             return  # Already handling
             
         self.detected_captcha = True
-        logger.error(f"🚨 BOT PROTECTION PAGE DETECTED on {source_name}!")
+        logger.error(f"🚨 BOT PROTECTION DETECTED on {source_name}!")
         
         # SUSPEND ANTI-DETECTION BEFORE SOLVING
         self.anti_detection_manager.suspend("bot_protection")
@@ -175,6 +187,7 @@ class CaptchaDetector:
         except ImportError as e:
             logger.error(f"❌ Cannot import CaptchaSolver: {e}")
             self.anti_detection_manager.resume()  # Resume on error
+            self.detected_captcha = False
             return
         
         # Pause all automations (don't stop them completely to keep pages open)
@@ -184,7 +197,7 @@ class CaptchaDetector:
             
         try:
             # Use solver to handle bot protection on the current page
-            solver = CaptchaSolver(self.browser_manager.config)
+            solver = CaptchaSolver(self.browser_manager.config, self.anti_detection_manager)
             success = await solver.solve_bot_protection(page)
             
             if success:
@@ -209,7 +222,7 @@ class CaptchaDetector:
             self.anti_detection_manager.resume()  # Always resume
             
     async def handle_captcha_detection(self, source_name: str, page: Page):
-        """Handle captcha detection"""
+        """Handle generic captcha detection (not bot protection)"""
         if self.detected_captcha:
             return  # Already handling
             
@@ -229,7 +242,7 @@ class CaptchaDetector:
             
         try:
             # Try to solve captcha
-            solver = CaptchaSolver(self.browser_manager.config)
+            solver = CaptchaSolver(self.browser_manager.config, self.anti_detection_manager)
             success = await solver.solve_captcha(page)
             
             if success:

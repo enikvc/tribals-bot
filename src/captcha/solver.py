@@ -73,8 +73,8 @@ class CaptchaSolver:
         return False
                 
     async def solve_bot_protection(self, page: Page) -> bool:
-        """Handle the bot protection page specifically"""
-        logger.info("🤖 Handling bot protection page...")
+        """Handle the bot protection page or quest"""
+        logger.info("🤖 Handling bot protection...")
         
         # SUSPEND ANTI-DETECTION
         if self.anti_detection:
@@ -88,7 +88,28 @@ class CaptchaSolver:
             # Make sure page is ready
             await page.wait_for_load_state('networkidle', timeout=5000)
             
-            # First, click the "Start bot protection check" button
+            # Check if this is the quest div (clicking it starts captcha directly)
+            quest_element = await page.query_selector('#botprotection_quest')
+            if quest_element:
+                logger.info("📋 Found bot protection quest - clicking to start captcha")
+                
+                # Capture before clicking quest
+                await screenshot_manager.capture_bot_protection(page, "before_quest_click")
+                
+                # Click the quest div to start captcha directly
+                await quest_element.click()
+                logger.info("✅ Clicked bot protection quest - captcha should appear")
+                
+                # Wait for captcha to appear
+                await asyncio.sleep(3)
+                
+                # Capture after quest click
+                await screenshot_manager.capture_bot_protection(page, "after_quest_click")
+                
+                # Now solve the captcha that appears
+                return await self._solve_bot_protection_captcha(page)
+                
+            # Otherwise, look for the "Start bot protection check" button (full page version)
             start_button_selector = 'td.bot-protection-row a.btn.btn-default'
             start_button = await page.wait_for_selector(start_button_selector, timeout=10000)
             

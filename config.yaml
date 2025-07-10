@@ -10,7 +10,7 @@ discord_webhook: ""
 server:
   base_url: "https://it94.tribals.it"
   login_url: "https://www.tribals.it"
-  village_id: 306  # Your village ID
+  village_id: 0  # Your village ID
   
 # Browser Configuration
 browser:
@@ -75,7 +75,7 @@ scripts:
     
   auto_farmer:
     enabled: true
-    interval_seconds: 600
+    interval_seconds: 1200
     plan_delay: 700
     icon_start_delay: 1000
     icon_click_interval: 300
@@ -83,8 +83,8 @@ scripts:
     
   auto_scavenger:
     enabled: true
-    base_interval_seconds: 600
-    interval_jitter_seconds: 60
+    base_interval_seconds: 900
+    interval_jitter_seconds: 90
     click_min_delay: 200
     click_max_delay: 800
     
