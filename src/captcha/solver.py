@@ -1,5 +1,5 @@
 """
-Captcha Solver - Updated with anti-detection suspension
+Captcha Solver - Fixed to properly handle login captcha without clicking away
 """
 import asyncio
 import os
@@ -285,7 +285,7 @@ class CaptchaSolver:
         return await self._solve_manually(page)
         
     async def solve_captcha(self, page: Page, is_bot_protection: bool = False) -> bool:
-        """Attempt to solve captcha on page (for login)"""
+        """Attempt to solve captcha on page (for login) - FIXED FOR INSTANT CHALLENGE"""
         logger.info(f"🔧 Attempting to solve login captcha...")
         
         # SUSPEND ANTI-DETECTION
@@ -296,97 +296,172 @@ class CaptchaSolver:
         # Capture initial state
         await screenshot_manager.capture_captcha(page, "login_initial")
         
+        # Get direct play URL from config
+        server_url = self.config.get('server', {}).get('base_url', 'https://it94.tribals.it')
+        import re
+        match = re.search(r'https://([a-z]+)(\d+)\.tribals\.([a-z.]+)', server_url)
+        if match:
+            server_prefix = match.group(1)
+            server_number = match.group(2)
+            direct_play_url = f"https://www.tribals.it/page/play/{server_prefix}{server_number}"
+        else:
+            direct_play_url = "https://www.tribals.it/page/play/it94"
+        
         try:
             if not HCAPTCHA_AVAILABLE or not self.gemini_api_key or self.force_manual:
                 logger.warning("⚠️ Automatic solving not available or disabled, using manual")
-                return await self._solve_manually(page)
+                return await self._solve_manually_login(page)
                 
+            # First, click the login button to trigger the captcha
+            logger.info("🖱️ Clicking login button to trigger captcha...")
+            login_btn = await page.query_selector('a.btn-login')
+            if not login_btn:
+                logger.error("❌ Login button not found")
+                return False
+                
+            # Simple click, no fancy stuff during captcha
+            await login_btn.click()
+            logger.info("✅ Clicked login button")
+            
+            # Wait a moment for the challenge to appear
+            logger.info("⏳ Waiting for hCaptcha challenge to appear...")
+            await asyncio.sleep(3)
+            
+            # Capture state after login click
+            await screenshot_manager.capture_captcha(page, "after_login_click")
+            
+            # Since there's no checkbox, the challenge appears immediately
+            # Check for challenge frame
+            challenge_frame = await self.monitor_captcha_frame(page)
+            if not challenge_frame:
+                logger.warning("⚠️ No challenge frame found - maybe no captcha required?")
+                # Check if we logged in anyway
+                await asyncio.sleep(3)
+                if "game.php" in page.url:
+                    logger.info("✅ Logged in without captcha!")
+                    return True
+                else:
+                    logger.error("❌ No captcha but also not logged in")
+                    return False
+                    
+            logger.info("✅ Found hCaptcha challenge frame - no checkbox needed!")
+            
+            # Check if it's multi-challenge before attempting
+            if await self.is_multi_challenge(page):
+                logger.warning("🔄 Multi-challenge captcha detected")
+                return await self._solve_manually_login(page)
+            
+            # Now handle the captcha challenge directly
             for attempt in range(self.max_retries):
                 try:
-                    logger.info(f"🔄 Attempt {attempt + 1}/{self.max_retries}")
+                    logger.info(f"🔄 Captcha solve attempt {attempt + 1}/{self.max_retries}")
                     
-                    # Capture attempt state
-                    await screenshot_manager.capture_captcha(page, f"login_attempt_{attempt + 1}")
+                    # Check if challenge is still present (it might have disappeared after failed attempt)
+                    challenge_frame = await self.monitor_captcha_frame(page)
+                    if not challenge_frame:
+                        logger.warning("⚠️ No challenge frame found")
+                        
+                        # Maybe we need to click login again to get a new captcha
+                        if attempt > 0:
+                            logger.info("🔄 Clicking login button again for new captcha...")
+                            login_btn = await page.query_selector('a.btn-login')
+                            if login_btn:
+                                await login_btn.click()
+                                await asyncio.sleep(3)
+                                
+                                # Check for new challenge
+                                challenge_frame = await self.monitor_captcha_frame(page)
+                                if not challenge_frame:
+                                    logger.error("❌ Still no challenge after re-clicking login")
+                                    continue
+                            else:
+                                continue
                     
-                    # Initialize AgentV
+                    # Initialize AgentV with special config for login page challenge
                     agent_config = AgentConfig(
                         GEMINI_API_KEY=self.gemini_api_key,
-                        EXECUTION_TIMEOUT=self.config.get('captcha', {}).get('response_timeout', 180),
-                        RESPONSE_TIMEOUT=self.config.get('captcha', {}).get('response_timeout', 180),
+                        EXECUTION_TIMEOUT=180,
+                        RESPONSE_TIMEOUT=180,
                         RETRY_ON_FAILURE=True,
                         WAIT_FOR_CHALLENGE_VIEW_TO_RENDER_MS=5000,
-                        enable_challenger_debug=True
+                        enable_challenger_debug=True,
+                        screenshot_timeout=60000,
+                        element_timeout=60000,
+                        click_precision_padding=10,
+                        verify_click_success=True,
+                        max_click_attempts=3,
+                        iframe_stability_delay=2000,
+                        # Disable some features that might interfere
+                        use_stealth_mode=False,
+                        use_random_user_agent=False,
+                        # Skip checkbox since there isn't one
+                        skip_checkbox=True
                     )
                     
                     # Create agent instance
                     agent = AgentV(page=page, agent_config=agent_config)
                     
-                    # For login, trigger via login button
-                    logger.info("🖱️ Clicking login button to trigger captcha...")
-                    try:
-                        agent.robotic_arm._checkbox_selector = 'a.btn-login'
-                        await agent.robotic_arm.click_checkbox()
-                        logger.info("✅ Clicked login button")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not click login with robotic arm: {e}")
-                        login_btn = await page.query_selector('a.btn-login')
-                        if login_btn:
-                            await login_btn.click()
-                        else:
-                            logger.error("❌ Login button not found")
-                            return False
-                    
-                    # Check if multi-challenge
-                    await asyncio.sleep(3)
-                    await screenshot_manager.capture_captcha(page, "after_login_button")
-                    
-                    if await self.is_multi_challenge(page):
-                        logger.warning("🔄 Multi-challenge captcha detected on login")
-                        return await self._solve_manually(page)
-                    
-                    # Now wait for and solve the challenge
-                    logger.info("⏳ Waiting for challenge to appear and solving...")
+                    # Since challenge is already present, solve it directly
+                    logger.info("🎯 Challenge already present, solving directly...")
                     
                     try:
-                        result = await agent.wait_for_challenge()
+                        # The challenge is already there, so we just need to solve it
+                        result = await asyncio.wait_for(
+                            agent.wait_for_challenge(),
+                            timeout=120
+                        )
                         logger.info(f"📊 Challenge result: {result}")
-                        
-                        # Capture result
-                        await screenshot_manager.capture_captcha(page, f"login_result_{attempt + 1}")
                         
                         # Check if successful
                         if result == ChallengeSignal.SUCCESS:
                             logger.info("✅ Challenge solved successfully!")
-                            return True
-                        elif result == ChallengeSignal.FAILURE:
-                            logger.warning("⚠️ Challenge failed, will retry")
-                        else:
-                            logger.warning(f"⚠️ Unexpected result: {result}")
                             
-                        # Additional check if captcha is gone
-                        await asyncio.sleep(2)
-                        if not await self._is_captcha_challenge_present(page):
-                            logger.info("✅ Captcha disappeared (challenge complete)!")
-                            return True
+                            # After solving captcha, we need to complete the login
+                            # The best way is to navigate to the direct play URL
+                            await asyncio.sleep(2)  # Wait for captcha validation
+                            
+                            logger.info(f"🔄 Navigating to game: {direct_play_url}")
+                            
+                            try:
+                                # Navigate to the play URL which will complete the login
+                                await page.goto(direct_play_url, wait_until='domcontentloaded', timeout=30000)
                                 
+                                # Give it time to redirect
+                                await asyncio.sleep(3)
+                                
+                                # Check if we're in the game
+                                current_url = page.url
+                                logger.info(f"📍 Current URL after navigation: {current_url}")
+                                
+                                if "game.php" in current_url:
+                                    logger.info("✅ Successfully logged in and entered game!")
+                                    return True
+                                else:
+                                    # Sometimes needs more time
+                                    logger.info("⏳ Waiting for game redirect...")
+                                    await asyncio.sleep(5)
+                                    
+                                    if "game.php" in page.url:
+                                        logger.info("✅ Login successful!")
+                                        return True
+                                    else:
+                                        logger.warning(f"⚠️ Not in game after navigation. URL: {page.url}")
+                                        
+                            except Exception as e:
+                                logger.error(f"❌ Error navigating after captcha: {e}")
+                                
+                        else:
+                            logger.warning(f"⚠️ Challenge not successful: {result}")
+                                    
+                    except asyncio.TimeoutError:
+                        logger.warning("⏱️ Challenge timeout")
+                        await screenshot_manager.capture_captcha(page, f"timeout_{attempt}")
                     except Exception as e:
-                        logger.error(f"❌ Error during challenge: {e}")
-                        await screenshot_manager.capture_captcha(page, f"login_error_{attempt + 1}")
-                        
-                        # Check if captcha is gone despite error
-                        await asyncio.sleep(2)
-                        if not await self._is_captcha_challenge_present(page):
-                            logger.info("✅ Captcha disappeared (after error)!")
-                            return True
-                        
-                    # Check if we reached the game
-                    if "game.php" in page.url:
-                        logger.info("✅ Successfully reached game!")
-                        return True
+                        logger.error(f"❌ Challenge error: {e}")
+                        await screenshot_manager.capture_captcha(page, f"error_{attempt}")
                         
                 except Exception as e:
-                    logger.error(f"❌ Error solving captcha: {e}", exc_info=True)
-                    await screenshot_manager.capture_captcha(page, f"login_exception_{attempt + 1}")
+                    logger.error(f"❌ Attempt {attempt + 1} failed: {e}", exc_info=True)
                     
                 # Wait before retry
                 if attempt < self.max_retries - 1:
@@ -394,14 +469,87 @@ class CaptchaSolver:
                     await asyncio.sleep(5)
                     
             logger.error("❌ Failed to solve captcha after all attempts")
-            await screenshot_manager.capture_captcha(page, "login_all_failed")
-            return await self._solve_manually(page)
+            return await self._solve_manually_login(page)
             
         finally:
             # ALWAYS RESUME ANTI-DETECTION
             if self.anti_detection:
                 self.anti_detection.resume()
                 logger.info("▶️ Anti-detection resumed after login captcha")
+                
+    async def _find_hcaptcha_iframe(self, page: Page) -> Optional[Frame]:
+        """Find the hCaptcha iframe on the page"""
+        # Check all frames
+        for frame in page.frames:
+            if 'hcaptcha.com' in frame.url:
+                logger.debug(f"Found hCaptcha frame: {frame.url}")
+                return frame
+                
+        # Also check for iframe elements
+        iframe_selectors = [
+            'iframe[src*="hcaptcha.com"]',
+            'iframe[data-hcaptcha-widget-id]',
+            '.h-captcha iframe',
+            'div[data-hcaptcha-widget-id] iframe'
+        ]
+        
+        for selector in iframe_selectors:
+            iframe = await page.query_selector(selector)
+            if iframe:
+                logger.debug(f"Found hCaptcha iframe via selector: {selector}")
+                # Get the frame from the iframe element
+                frame_element = await iframe.content_frame()
+                if frame_element:
+                    return frame_element
+                    
+        return None
+        
+    async def _find_hcaptcha_frame(self, page: Page) -> Optional[Frame]:
+        """Find the hCaptcha frame (not challenge frame)"""
+        for frame in page.frames:
+            if 'hcaptcha.com' in frame.url and 'hcaptcha.html' in frame.url:
+                return frame
+        return None
+        
+    async def _solve_manually_login(self, page: Page) -> bool:
+        """Manual solve specifically for login page"""
+        logger.warning("=" * 60)
+        logger.warning("⚠️  MANUAL LOGIN CAPTCHA SOLVE REQUIRED")
+        logger.warning("=" * 60)
+        logger.warning("Please solve the captcha in the browser window")
+        logger.warning("The bot will continue once you're logged in")
+        logger.warning("=" * 60)
+        
+        # Play notification sound
+        try:
+            if os.name == 'posix':  # macOS/Linux
+                os.system('afplay /System/Library/Sounds/Glass.aiff 2>/dev/null || echo -e "\\a"')
+            elif os.name == 'nt':  # Windows
+                import winsound
+                winsound.Beep(1000, 500)
+        except:
+            pass
+            
+        # Wait for login to complete
+        max_wait = self.timeout
+        check_interval = 2
+        elapsed = 0
+        
+        while elapsed < max_wait:
+            # Check if we're logged in (reached game.php)
+            if "game.php" in page.url:
+                logger.info("✅ Manual login successful!")
+                return True
+                
+            await asyncio.sleep(check_interval)
+            elapsed += check_interval
+            
+            if elapsed % 15 == 0:  # Remind every 15 seconds
+                remaining = max_wait - elapsed
+                logger.warning(f"⏰ Waiting for manual login... ({remaining}s remaining)")
+                
+        logger.error("❌ Login timeout")
+        return False
         
     async def _is_bot_protection_active(self, page: Page) -> bool:
         """Check if bot protection is still active"""
