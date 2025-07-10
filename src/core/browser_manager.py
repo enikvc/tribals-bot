@@ -26,7 +26,8 @@ class BrowserManager:
         self.contexts: Dict[str, BrowserContext] = {}
         self.pages: Dict[str, Page] = {}
         self.captcha_detector = CaptchaDetector(self)
-        self.login_handler = LoginHandler(config)
+        self.anti_detection_manager = self.captcha_detector.anti_detection_manager
+        self.login_handler = LoginHandler(config, self.anti_detection_manager)
         self.main_context: Optional[BrowserContext] = None
         self.scheduler = None  # Will be set by scheduler
         self.game_page = None  # Store reference to main game page

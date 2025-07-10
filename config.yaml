@@ -19,7 +19,7 @@ browser:
   user_data_dir: "./browser_data"
   viewport:
     width: 1440
-    height: 720
+    height: 690
   # Authentic Chrome settings
   chrome_version: "138"
   platform: "macOS"

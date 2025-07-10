@@ -17,11 +17,11 @@ logger = setup_logger(__name__)
 class LoginHandler:
     """Handles login to Tribals with anti-detection measures"""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], anti_detection_manager=None):
         self.config = config
         self.username = config.get('username') or os.getenv('TRIBALS_USERNAME')
         self.password = config.get('password') or os.getenv('TRIBALS_PASSWORD')
-        self.captcha_solver = CaptchaSolver(config)
+        self.captcha_solver = CaptchaSolver(config, anti_detection_manager)
         
         # Parse server from config
         server_url = config.get('server', {}).get('base_url', 'https://it94.tribals.it')

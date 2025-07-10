@@ -1,5 +1,5 @@
 """
-Anti-Detection Utilities - Human-like behavior simulation
+Anti-Detection Utilities - Human-like behavior simulation with captcha safety
 """
 import asyncio
 import random
@@ -13,16 +13,49 @@ from .logger import setup_logger
 logger = setup_logger(__name__)
 
 
-class HumanBehavior:
-    """Simulates human-like behavior patterns"""
+class AntiDetectionManager:
+    """Manages anti-detection behaviors with suspension capability"""
     
     def __init__(self):
+        self.suspended = False
+        self.suspension_reason = ""
+        self.human = HumanBehavior(self)
+        self.session = SessionBehavior(self)
+        
+    def suspend(self, reason: str = "captcha"):
+        """Suspend all anti-detection behaviors"""
+        self.suspended = True
+        self.suspension_reason = reason
+        logger.info(f"🛑 Anti-detection suspended: {reason}")
+        
+    def resume(self):
+        """Resume anti-detection behaviors"""
+        self.suspended = False
+        self.suspension_reason = ""
+        logger.info("▶️ Anti-detection resumed")
+        
+    def is_suspended(self) -> bool:
+        """Check if behaviors are suspended"""
+        return self.suspended
+
+
+class HumanBehavior:
+    """Simulates human-like behavior patterns with suspension support"""
+    
+    def __init__(self, manager: AntiDetectionManager):
+        self.manager = manager
         self.last_action_time = datetime.now()
         self.action_count = 0
         self.session_start = datetime.now()
         
     async def natural_mouse_move(self, page: Page, target_x: float, target_y: float):
         """Move mouse naturally with bezier curves and variable speed"""
+        # Skip if suspended
+        if self.manager.is_suspended():
+            # Direct move without animation during suspension
+            await page.mouse.move(target_x, target_y)
+            return
+            
         try:
             # Get current position
             current_x = random.randint(0, 1920)  # Start from random position
@@ -65,6 +98,14 @@ class HumanBehavior:
     async def human_click(self, page: Page, element: Optional[ElementHandle] = None, 
                          x: Optional[float] = None, y: Optional[float] = None):
         """Click with human-like behavior"""
+        # During suspension, do simple click
+        if self.manager.is_suspended():
+            if element:
+                await element.click()
+            elif x is not None and y is not None:
+                await page.mouse.click(x, y)
+            return True
+            
         try:
             if element:
                 box = await element.bounding_box()
@@ -84,8 +125,8 @@ class HumanBehavior:
             # Small pause before click (human reaction time)
             await asyncio.sleep(random.uniform(0.05, 0.15))
             
-            # Sometimes double-click accidentally (rare)
-            if random.random() < 0.01:
+            # Sometimes double-click accidentally (rare) - NOT during captcha
+            if random.random() < 0.01 and not self.manager.is_suspended():
                 await page.mouse.click(x, y)
                 await asyncio.sleep(random.uniform(0.05, 0.1))
                 
@@ -95,8 +136,8 @@ class HumanBehavior:
                 y + random.uniform(-2, 2)
             )
             
-            # Sometimes hold click slightly longer
-            if random.random() < 0.1:
+            # Sometimes hold click slightly longer - NOT during captcha
+            if random.random() < 0.1 and not self.manager.is_suspended():
                 await page.mouse.down()
                 await asyncio.sleep(random.uniform(0.05, 0.15))
                 await page.mouse.up()
@@ -111,6 +152,11 @@ class HumanBehavior:
         """Type with human-like patterns including mistakes and corrections"""
         if element:
             await self.human_click(page, element)
+        
+        # No typos during captcha/suspension
+        if self.manager.is_suspended():
+            await page.keyboard.type(text)
+            return
         
         for i, char in enumerate(text):
             # Occasionally make typos (1% chance)
@@ -148,6 +194,10 @@ class HumanBehavior:
                 
     async def random_mouse_movement(self, page: Page, duration: float = 2.0):
         """Random idle mouse movements"""
+        # Skip completely during suspension
+        if self.manager.is_suspended():
+            return
+            
         start_time = asyncio.get_event_loop().time()
         
         while asyncio.get_event_loop().time() - start_time < duration:
@@ -160,6 +210,10 @@ class HumanBehavior:
             
     async def human_scroll(self, page: Page, direction: str = 'random'):
         """Simulate human scrolling patterns"""
+        # Skip during suspension
+        if self.manager.is_suspended():
+            return
+            
         if direction == 'random':
             direction = random.choice(['up', 'down'])
             
@@ -184,6 +238,11 @@ class HumanBehavior:
             
     async def reading_pause(self, text_length: int):
         """Simulate reading time based on content length"""
+        # Minimal pause during suspension
+        if self.manager.is_suspended():
+            await asyncio.sleep(0.1)
+            return
+            
         # Average reading speed: 200-300 words per minute
         words = text_length / 5  # Average word length
         reading_speed = random.uniform(200, 300)
@@ -200,6 +259,10 @@ class HumanBehavior:
         
     async def random_tab_switch(self, page: Page):
         """Simulate switching tabs (losing focus)"""
+        # Never switch tabs during suspension
+        if self.manager.is_suspended():
+            return
+            
         if random.random() < 0.05:  # 5% chance
             logger.debug("Simulating tab switch")
             # Trigger blur event
@@ -210,10 +273,16 @@ class HumanBehavior:
             
     async def micro_pause(self):
         """Small thinking pauses between actions"""
+        if self.manager.is_suspended():
+            return
+            
         await asyncio.sleep(random.uniform(0.1, 0.5))
         
     async def fatigue_adjustment(self) -> float:
         """Adjust delays based on session duration (simulate fatigue)"""
+        if self.manager.is_suspended():
+            return 1.0
+            
         session_duration = (datetime.now() - self.session_start).total_seconds() / 3600
         
         # Increase delays over time
@@ -228,6 +297,10 @@ class HumanBehavior:
             
     async def random_break(self) -> bool:
         """Decide if it's time for a break"""
+        # No breaks during suspension
+        if self.manager.is_suspended():
+            return False
+            
         session_duration = (datetime.now() - self.session_start).total_seconds() / 3600
         
         # Increasing chance of break over time
@@ -237,6 +310,9 @@ class HumanBehavior:
         
     def get_human_delay(self, base_min: float, base_max: float) -> float:
         """Get delay adjusted for fatigue and randomness"""
+        if self.manager.is_suspended():
+            return 0  # No delay during suspension
+            
         fatigue_multiplier = 1.0
         session_duration = (datetime.now() - self.session_start).total_seconds() / 3600
         
@@ -252,338 +328,19 @@ class HumanBehavior:
         return delay
 
 
-class BrowserFingerprint:
-    """Manages browser fingerprinting protection"""
-    
-    @staticmethod
-    def get_enhanced_stealth_script() -> str:
-        """Get enhanced stealth JavaScript to inject"""
-        return """
-        // Enhanced stealth mode
-        (function() {
-            // Override webdriver
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => false
-            });
-            
-            // Mock plugins realistically
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => {
-                    const plugins = [
-                        {
-                            name: 'Chrome PDF Plugin',
-                            description: 'Portable Document Format',
-                            filename: 'internal-pdf-viewer',
-                            length: 1
-                        },
-                        {
-                            name: 'Chrome PDF Viewer',
-                            description: 'Portable Document Format',
-                            filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
-                            length: 1
-                        },
-                        {
-                            name: 'Native Client',
-                            description: 'Native Client Executable',
-                            filename: 'internal-nacl-plugin',
-                            length: 2
-                        }
-                    ];
-                    
-                    plugins.forEach(p => {
-                        p[0] = {
-                            type: 'application/x-google-chrome-pdf',
-                            suffixes: 'pdf',
-                            description: 'Portable Document Format',
-                            enabledPlugin: p
-                        };
-                    });
-                    
-                    plugins.item = index => plugins[index];
-                    plugins.namedItem = name => plugins.find(p => p.name === name);
-                    plugins.refresh = () => {};
-                    
-                    return plugins;
-                }
-            });
-            
-            // Hardware concurrency variation
-            Object.defineProperty(navigator, 'hardwareConcurrency', {
-                get: () => {
-                    const cores = [2, 4, 6, 8, 12, 16];
-                    return cores[Math.floor(Math.random() * cores.length)];
-                }
-            });
-            
-            // Device memory
-            if ('deviceMemory' in navigator) {
-                Object.defineProperty(navigator, 'deviceMemory', {
-                    get: () => {
-                        const memories = [2, 4, 8, 16];
-                        return memories[Math.floor(Math.random() * memories.length)];
-                    }
-                });
-            }
-            
-            // WebGL vendor/renderer
-            const getParameter = WebGLRenderingContext.prototype.getParameter;
-            WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                if (parameter === 37445) {
-                    return 'Intel Inc.';
-                }
-                if (parameter === 37446) {
-                    return 'Intel Iris OpenGL Engine';
-                }
-                return getParameter.apply(this, arguments);
-            };
-            
-            const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
-            WebGL2RenderingContext.prototype.getParameter = function(parameter) {
-                if (parameter === 37445) {
-                    return 'Intel Inc.';
-                }
-                if (parameter === 37446) {
-                    return 'Intel Iris OpenGL Engine';
-                }
-                return getParameter2.apply(this, arguments);
-            };
-            
-            // Battery API
-            if ('getBattery' in navigator) {
-                navigator.getBattery = async () => ({
-                    charging: true,
-                    chargingTime: 0,
-                    dischargingTime: Infinity,
-                    level: 0.98,
-                    addEventListener: () => {},
-                    removeEventListener: () => {}
-                });
-            }
-            
-            // Connection info
-            if ('connection' in navigator) {
-                Object.defineProperty(navigator.connection, 'rtt', {
-                    get: () => 50 + Math.floor(Math.random() * 100)
-                });
-            }
-            
-            // Chrome specific
-            window.chrome = {
-                app: {
-                    isInstalled: false,
-                    InstallState: {
-                        DISABLED: 'disabled',
-                        INSTALLED: 'installed',
-                        NOT_INSTALLED: 'not_installed'
-                    },
-                    RunningState: {
-                        CANNOT_RUN: 'cannot_run',
-                        READY_TO_RUN: 'ready_to_run',
-                        RUNNING: 'running'
-                    }
-                },
-                runtime: {
-                    OnInstalledReason: {
-                        CHROME_UPDATE: 'chrome_update',
-                        INSTALL: 'install',
-                        SHARED_MODULE_UPDATE: 'shared_module_update',
-                        UPDATE: 'update'
-                    },
-                    OnRestartRequiredReason: {
-                        APP_UPDATE: 'app_update',
-                        OS_UPDATE: 'os_update',
-                        PERIODIC: 'periodic'
-                    },
-                    PlatformArch: {
-                        ARM: 'arm',
-                        ARM64: 'arm64',
-                        MIPS: 'mips',
-                        MIPS64: 'mips64',
-                        X86_32: 'x86-32',
-                        X86_64: 'x86-64'
-                    },
-                    PlatformNaclArch: {
-                        ARM: 'arm',
-                        MIPS: 'mips',
-                        MIPS64: 'mips64',
-                        X86_32: 'x86-32',
-                        X86_64: 'x86-64'
-                    },
-                    PlatformOs: {
-                        ANDROID: 'android',
-                        CROS: 'cros',
-                        LINUX: 'linux',
-                        MAC: 'mac',
-                        OPENBSD: 'openbsd',
-                        WIN: 'win'
-                    },
-                    RequestUpdateCheckStatus: {
-                        NO_UPDATE: 'no_update',
-                        THROTTLED: 'throttled',
-                        UPDATE_AVAILABLE: 'update_available'
-                    },
-                    id: undefined,
-                    connect: () => {},
-                    sendMessage: () => {}
-                },
-                loadTimes: function() {
-                    return {
-                        requestTime: Date.now() / 1000 - 100,
-                        startLoadTime: Date.now() / 1000 - 99,
-                        commitLoadTime: Date.now() / 1000 - 98,
-                        finishDocumentLoadTime: Date.now() / 1000 - 97,
-                        finishLoadTime: Date.now() / 1000 - 96,
-                        firstPaintTime: Date.now() / 1000 - 95,
-                        firstPaintAfterLoadTime: 0,
-                        navigationType: 'Other',
-                        wasFetchedViaSpdy: false,
-                        wasNpnNegotiated: true,
-                        npnNegotiatedProtocol: 'h2',
-                        wasAlternateProtocolAvailable: false,
-                        connectionInfo: 'h2'
-                    };
-                },
-                csi: function() {
-                    return {
-                        onloadT: Date.now(),
-                        pageT: Date.now() - 1000,
-                        startE: Date.now() - 2000,
-                        tran: 15
-                    };
-                }
-            };
-            
-            // Remove automation-related properties
-            delete navigator.__proto__.webdriver;
-            
-            // Timezone spoofing
-            const originalDateTimeFormat = Intl.DateTimeFormat;
-            Intl.DateTimeFormat = function(...args) {
-                if (args.length === 0) {
-                    args.push('it-IT');
-                }
-                return originalDateTimeFormat.apply(this, args);
-            };
-            Intl.DateTimeFormat.prototype = originalDateTimeFormat.prototype;
-            
-            // Canvas fingerprinting protection (adds noise)
-            const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
-            HTMLCanvasElement.prototype.toDataURL = function(...args) {
-                const context = this.getContext('2d');
-                if (context) {
-                    // Add invisible noise
-                    const imageData = context.getImageData(0, 0, this.width, this.height);
-                    for (let i = 0; i < imageData.data.length; i += 4) {
-                        imageData.data[i] += Math.random() * 0.1;
-                        imageData.data[i+1] += Math.random() * 0.1;
-                        imageData.data[i+2] += Math.random() * 0.1;
-                    }
-                    context.putImageData(imageData, 0, 0);
-                }
-                return originalToDataURL.apply(this, args);
-            };
-            
-            // Audio fingerprinting protection
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (AudioContext) {
-                const originalCreateOscillator = AudioContext.prototype.createOscillator;
-                AudioContext.prototype.createOscillator = function() {
-                    const oscillator = originalCreateOscillator.apply(this, arguments);
-                    const originalConnect = oscillator.connect;
-                    oscillator.connect = function() {
-                        // Add slight frequency variation
-                        if (oscillator.frequency) {
-                            oscillator.frequency.value += Math.random() * 0.01;
-                        }
-                        return originalConnect.apply(this, arguments);
-                    };
-                    return oscillator;
-                };
-            }
-            
-            // Prevent toString detection
-            const originalToString = Function.prototype.toString;
-            Function.prototype.toString = function() {
-                if (this === window.navigator.webdriver) {
-                    return 'function webdriver() { [native code] }';
-                }
-                return originalToString.apply(this, arguments);
-            };
-            
-            // Mock permissions realistically
-            if (navigator.permissions) {
-                const originalQuery = navigator.permissions.query;
-                navigator.permissions.query = async (params) => {
-                    if (params.name === 'notifications') {
-                        return { state: 'prompt', onchange: null };
-                    }
-                    return originalQuery.apply(navigator.permissions, arguments);
-                };
-            }
-        })();
-        """
-
-
-class NetworkBehavior:
-    """Simulates realistic network behavior"""
-    
-    @staticmethod
-    async def add_request_headers(route, request):
-        """Add realistic headers to requests"""
-        headers = request.headers.copy()
-        
-        # Add random referer sometimes
-        if random.random() < 0.7 and 'referer' not in headers:
-            headers['referer'] = request.url.split('?')[0]
-            
-        # Vary accept-encoding
-        if random.random() < 0.1:
-            headers['accept-encoding'] = 'gzip, deflate'
-            
-        # Add DNT header sometimes
-        if random.random() < 0.3:
-            headers['dnt'] = '1'
-            
-        # Realistic cache headers
-        if random.random() < 0.5:
-            headers['cache-control'] = random.choice([
-                'max-age=0',
-                'no-cache',
-                'no-cache, no-store, must-revalidate'
-            ])
-            
-        await route.continue_(headers=headers)
-        
-    @staticmethod
-    async def simulate_network_conditions(page: Page):
-        """Simulate variable network conditions"""
-        if random.random() < 0.05:  # 5% chance of slow network
-            await page.context.set_offline(True)
-            await asyncio.sleep(random.uniform(0.5, 2))
-            await page.context.set_offline(False)
-            
-    @staticmethod
-    def get_random_user_agent() -> str:
-        """Get a random realistic user agent"""
-        user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
-        ]
-        return random.choice(user_agents)
-
-
 class SessionBehavior:
     """Manages session-level behavior patterns"""
     
-    def __init__(self):
+    def __init__(self, manager: AntiDetectionManager):
+        self.manager = manager
         self.action_history: List[Tuple[datetime, str]] = []
         self.break_schedule = self._generate_break_schedule()
         
     def _generate_break_schedule(self) -> List[datetime]:
         """Generate random break times for the session"""
+        if self.manager.is_suspended():
+            return []
+            
         breaks = []
         current_time = datetime.now()
         
@@ -598,6 +355,9 @@ class SessionBehavior:
         
     def should_take_break(self) -> Tuple[bool, int]:
         """Check if it's time for a break"""
+        if self.manager.is_suspended():
+            return False, 0
+            
         now = datetime.now()
         
         for break_time in self.break_schedule:
@@ -618,6 +378,9 @@ class SessionBehavior:
             
     def get_action_delay_multiplier(self) -> float:
         """Get delay multiplier based on recent activity"""
+        if self.manager.is_suspended():
+            return 0
+            
         if len(self.action_history) < 10:
             return 1.0
             
@@ -634,3 +397,55 @@ class SessionBehavior:
             return random.uniform(1.2, 1.5)
         else:
             return 1.0
+
+
+# Placeholder for backwards compatibility
+class NetworkBehavior:
+    """Deprecated - no longer needed since we use authentic headers"""
+    pass
+
+
+# Browser fingerprint still needed for webdriver detection, but no header/UA manipulation
+class BrowserFingerprint:
+    """Manages browser fingerprinting protection - ONLY JavaScript injection"""
+    
+    @staticmethod
+    def get_enhanced_stealth_script() -> str:
+        """Get enhanced stealth JavaScript to inject - focuses on webdriver detection only"""
+        return """
+        // Enhanced stealth mode - webdriver detection only
+        (function() {
+            // Override webdriver detection
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => false
+            });
+            
+            // Remove automation-related properties
+            delete navigator.__proto__.webdriver;
+            
+            // Chrome automation detection
+            if (window.chrome) {
+                Object.defineProperty(window.chrome, 'runtime', {
+                    get: () => ({
+                        connect: () => {},
+                        sendMessage: () => {},
+                        id: undefined
+                    })
+                });
+            }
+            
+            // Prevent toString detection for webdriver
+            const originalToString = Function.prototype.toString;
+            Function.prototype.toString = function() {
+                if (this === window.navigator.webdriver) {
+                    return 'function webdriver() { [native code] }';
+                }
+                return originalToString.apply(this, arguments);
+            };
+            
+            // Remove common automation indicators
+            delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+            delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+            delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+        })();
+        """

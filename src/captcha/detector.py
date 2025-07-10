@@ -1,23 +1,25 @@
 """
-Captcha Detector - Monitors for captcha challenges and bot protection
+Captcha Detector - Monitors for captcha challenges and manages anti-detection suspension
 """
 import asyncio
 from typing import Set, Optional
 from playwright.async_api import Page
 
 from ..utils.logger import setup_logger
+from ..utils.anti_detection import AntiDetectionManager
 
 logger = setup_logger(__name__)
 
 
 class CaptchaDetector:
-    """Detects captcha challenges and bot protection across all pages"""
+    """Detects captcha challenges and manages anti-detection during solving"""
     
     def __init__(self, browser_manager):
         self.browser_manager = browser_manager
         self.monitoring = False
         self.detected_captcha = False
         self.monitored_pages: Set[Page] = set()
+        self.anti_detection_manager = AntiDetectionManager()
         
     async def start_monitoring(self):
         """Start monitoring for captchas and bot protection"""
@@ -134,11 +136,15 @@ class CaptchaDetector:
         self.detected_captcha = True
         logger.error(f"🚨 BOT PROTECTION PAGE DETECTED on {script_name}!")
         
+        # SUSPEND ANTI-DETECTION BEFORE SOLVING
+        self.anti_detection_manager.suspend("bot_protection")
+        
         # Avoid circular import by checking if solver is already imported
         try:
             from .solver import CaptchaSolver
         except ImportError as e:
             logger.error(f"❌ Cannot import CaptchaSolver: {e}")
+            self.anti_detection_manager.resume()  # Resume on error
             return
         
         # Pause all automations (don't stop them completely to keep pages open)
@@ -154,15 +160,23 @@ class CaptchaDetector:
             if success:
                 logger.info("✅ Bot protection passed successfully!")
                 self.detected_captcha = False
+                
+                # RESUME ANTI-DETECTION AFTER SOLVING
+                self.anti_detection_manager.resume()
+                
                 # Resume automations
                 if scheduler:
                     await scheduler.resume_after_captcha()
             else:
                 logger.error("❌ Failed to pass bot protection - manual intervention required")
                 # Keep detected_captcha = True to prevent repeated attempts
+                # But still resume anti-detection
+                self.anti_detection_manager.resume()
+                
         except Exception as e:
             logger.error(f"❌ Error handling bot protection: {e}", exc_info=True)
             self.detected_captcha = False  # Reset to allow retry
+            self.anti_detection_manager.resume()  # Always resume
             
     async def handle_captcha_detection(self, script_name: str, page: Page):
         """Handle captcha detection"""
@@ -171,6 +185,9 @@ class CaptchaDetector:
             
         self.detected_captcha = True
         logger.error(f"🚨 CAPTCHA DETECTED on {script_name} page!")
+        
+        # SUSPEND ANTI-DETECTION BEFORE SOLVING
+        self.anti_detection_manager.suspend("captcha")
         
         # Import solver here to avoid circular imports
         from .solver import CaptchaSolver
@@ -188,12 +205,20 @@ class CaptchaDetector:
             if success:
                 logger.info("✅ Captcha solved successfully!")
                 self.detected_captcha = False
+                
+                # RESUME ANTI-DETECTION AFTER SOLVING
+                self.anti_detection_manager.resume()
+                
                 # Resume automations
                 if scheduler:
                     await scheduler.resume_after_captcha()
             else:
                 logger.error("❌ Failed to solve captcha - manual intervention required")
                 # Keep detected_captcha = True to prevent repeated attempts
+                # But still resume anti-detection
+                self.anti_detection_manager.resume()
+                
         except Exception as e:
             logger.error(f"❌ Error handling captcha: {e}", exc_info=True)
             self.detected_captcha = False  # Reset to allow retry
+            self.anti_detection_manager.resume()  # Always resume

@@ -1,5 +1,5 @@
 """
-Captcha Solver - Updated with screenshot manager
+Captcha Solver - Updated with anti-detection suspension
 """
 import asyncio
 import os
@@ -30,12 +30,13 @@ except ImportError as e:
 class CaptchaSolver:
     """Solves hCaptcha using hcaptcha-challenger"""
     
-    def __init__(self, config):
+    def __init__(self, config, anti_detection_manager=None):
         self.config = config
         self.max_retries = config.get('captcha', {}).get('max_retries', 3)
         self.timeout = config.get('captcha', {}).get('solver_timeout', 180)
         self.gemini_api_key = os.getenv('GEMINI_API_KEY')
         self.force_manual = os.getenv('FORCE_MANUAL_CAPTCHA', 'false').lower() == 'true'
+        self.anti_detection = anti_detection_manager
         
         if HCAPTCHA_AVAILABLE and self.gemini_api_key:
             logger.info(f"✅ Gemini API key configured: {self.gemini_api_key[:10]}...")
@@ -74,6 +75,11 @@ class CaptchaSolver:
     async def solve_bot_protection(self, page: Page) -> bool:
         """Handle the bot protection page specifically"""
         logger.info("🤖 Handling bot protection page...")
+        
+        # SUSPEND ANTI-DETECTION
+        if self.anti_detection:
+            self.anti_detection.suspend("bot_protection")
+            logger.info("🛑 Anti-detection suspended for bot protection")
         
         # Capture initial state
         await screenshot_manager.capture_bot_protection(page, "initial_state")
@@ -148,6 +154,11 @@ class CaptchaSolver:
             await screenshot_manager.capture_bot_protection(page, f"error_{str(e)[:30]}")
             # Try manual solve as fallback
             return await self._solve_manually(page)
+        finally:
+            # ALWAYS RESUME ANTI-DETECTION
+            if self.anti_detection:
+                self.anti_detection.resume()
+                logger.info("▶️ Anti-detection resumed after bot protection")
             
     async def _solve_bot_protection_captcha(self, page: Page) -> bool:
         """Solve the captcha that appears after clicking bot protection button"""
@@ -277,108 +288,120 @@ class CaptchaSolver:
         """Attempt to solve captcha on page (for login)"""
         logger.info(f"🔧 Attempting to solve login captcha...")
         
+        # SUSPEND ANTI-DETECTION
+        if self.anti_detection:
+            self.anti_detection.suspend("login_captcha")
+            logger.info("🛑 Anti-detection suspended for login captcha")
+        
         # Capture initial state
         await screenshot_manager.capture_captcha(page, "login_initial")
         
-        if not HCAPTCHA_AVAILABLE or not self.gemini_api_key or self.force_manual:
-            logger.warning("⚠️ Automatic solving not available or disabled, using manual")
+        try:
+            if not HCAPTCHA_AVAILABLE or not self.gemini_api_key or self.force_manual:
+                logger.warning("⚠️ Automatic solving not available or disabled, using manual")
+                return await self._solve_manually(page)
+                
+            for attempt in range(self.max_retries):
+                try:
+                    logger.info(f"🔄 Attempt {attempt + 1}/{self.max_retries}")
+                    
+                    # Capture attempt state
+                    await screenshot_manager.capture_captcha(page, f"login_attempt_{attempt + 1}")
+                    
+                    # Initialize AgentV
+                    agent_config = AgentConfig(
+                        GEMINI_API_KEY=self.gemini_api_key,
+                        EXECUTION_TIMEOUT=self.config.get('captcha', {}).get('response_timeout', 180),
+                        RESPONSE_TIMEOUT=self.config.get('captcha', {}).get('response_timeout', 180),
+                        RETRY_ON_FAILURE=True,
+                        WAIT_FOR_CHALLENGE_VIEW_TO_RENDER_MS=5000,
+                        enable_challenger_debug=True
+                    )
+                    
+                    # Create agent instance
+                    agent = AgentV(page=page, agent_config=agent_config)
+                    
+                    # For login, trigger via login button
+                    logger.info("🖱️ Clicking login button to trigger captcha...")
+                    try:
+                        agent.robotic_arm._checkbox_selector = 'a.btn-login'
+                        await agent.robotic_arm.click_checkbox()
+                        logger.info("✅ Clicked login button")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not click login with robotic arm: {e}")
+                        login_btn = await page.query_selector('a.btn-login')
+                        if login_btn:
+                            await login_btn.click()
+                        else:
+                            logger.error("❌ Login button not found")
+                            return False
+                    
+                    # Check if multi-challenge
+                    await asyncio.sleep(3)
+                    await screenshot_manager.capture_captcha(page, "after_login_button")
+                    
+                    if await self.is_multi_challenge(page):
+                        logger.warning("🔄 Multi-challenge captcha detected on login")
+                        return await self._solve_manually(page)
+                    
+                    # Now wait for and solve the challenge
+                    logger.info("⏳ Waiting for challenge to appear and solving...")
+                    
+                    try:
+                        result = await agent.wait_for_challenge()
+                        logger.info(f"📊 Challenge result: {result}")
+                        
+                        # Capture result
+                        await screenshot_manager.capture_captcha(page, f"login_result_{attempt + 1}")
+                        
+                        # Check if successful
+                        if result == ChallengeSignal.SUCCESS:
+                            logger.info("✅ Challenge solved successfully!")
+                            return True
+                        elif result == ChallengeSignal.FAILURE:
+                            logger.warning("⚠️ Challenge failed, will retry")
+                        else:
+                            logger.warning(f"⚠️ Unexpected result: {result}")
+                            
+                        # Additional check if captcha is gone
+                        await asyncio.sleep(2)
+                        if not await self._is_captcha_challenge_present(page):
+                            logger.info("✅ Captcha disappeared (challenge complete)!")
+                            return True
+                                
+                    except Exception as e:
+                        logger.error(f"❌ Error during challenge: {e}")
+                        await screenshot_manager.capture_captcha(page, f"login_error_{attempt + 1}")
+                        
+                        # Check if captcha is gone despite error
+                        await asyncio.sleep(2)
+                        if not await self._is_captcha_challenge_present(page):
+                            logger.info("✅ Captcha disappeared (after error)!")
+                            return True
+                        
+                    # Check if we reached the game
+                    if "game.php" in page.url:
+                        logger.info("✅ Successfully reached game!")
+                        return True
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error solving captcha: {e}", exc_info=True)
+                    await screenshot_manager.capture_captcha(page, f"login_exception_{attempt + 1}")
+                    
+                # Wait before retry
+                if attempt < self.max_retries - 1:
+                    logger.info(f"⏳ Waiting 5s before retry...")
+                    await asyncio.sleep(5)
+                    
+            logger.error("❌ Failed to solve captcha after all attempts")
+            await screenshot_manager.capture_captcha(page, "login_all_failed")
             return await self._solve_manually(page)
             
-        for attempt in range(self.max_retries):
-            try:
-                logger.info(f"🔄 Attempt {attempt + 1}/{self.max_retries}")
-                
-                # Capture attempt state
-                await screenshot_manager.capture_captcha(page, f"login_attempt_{attempt + 1}")
-                
-                # Initialize AgentV
-                agent_config = AgentConfig(
-                    GEMINI_API_KEY=self.gemini_api_key,
-                    EXECUTION_TIMEOUT=self.config.get('captcha', {}).get('response_timeout', 180),
-                    RESPONSE_TIMEOUT=self.config.get('captcha', {}).get('response_timeout', 180),
-                    RETRY_ON_FAILURE=True,
-                    WAIT_FOR_CHALLENGE_VIEW_TO_RENDER_MS=5000,
-                    enable_challenger_debug=True
-                )
-                
-                # Create agent instance
-                agent = AgentV(page=page, agent_config=agent_config)
-                
-                # For login, trigger via login button
-                logger.info("🖱️ Clicking login button to trigger captcha...")
-                try:
-                    agent.robotic_arm._checkbox_selector = 'a.btn-login'
-                    await agent.robotic_arm.click_checkbox()
-                    logger.info("✅ Clicked login button")
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not click login with robotic arm: {e}")
-                    login_btn = await page.query_selector('a.btn-login')
-                    if login_btn:
-                        await login_btn.click()
-                    else:
-                        logger.error("❌ Login button not found")
-                        return False
-                
-                # Check if multi-challenge
-                await asyncio.sleep(3)
-                await screenshot_manager.capture_captcha(page, "after_login_button")
-                
-                if await self.is_multi_challenge(page):
-                    logger.warning("🔄 Multi-challenge captcha detected on login")
-                    return await self._solve_manually(page)
-                
-                # Now wait for and solve the challenge
-                logger.info("⏳ Waiting for challenge to appear and solving...")
-                
-                try:
-                    result = await agent.wait_for_challenge()
-                    logger.info(f"📊 Challenge result: {result}")
-                    
-                    # Capture result
-                    await screenshot_manager.capture_captcha(page, f"login_result_{attempt + 1}")
-                    
-                    # Check if successful
-                    if result == ChallengeSignal.SUCCESS:
-                        logger.info("✅ Challenge solved successfully!")
-                        return True
-                    elif result == ChallengeSignal.FAILURE:
-                        logger.warning("⚠️ Challenge failed, will retry")
-                    else:
-                        logger.warning(f"⚠️ Unexpected result: {result}")
-                        
-                    # Additional check if captcha is gone
-                    await asyncio.sleep(2)
-                    if not await self._is_captcha_challenge_present(page):
-                        logger.info("✅ Captcha disappeared (challenge complete)!")
-                        return True
-                            
-                except Exception as e:
-                    logger.error(f"❌ Error during challenge: {e}")
-                    await screenshot_manager.capture_captcha(page, f"login_error_{attempt + 1}")
-                    
-                    # Check if captcha is gone despite error
-                    await asyncio.sleep(2)
-                    if not await self._is_captcha_challenge_present(page):
-                        logger.info("✅ Captcha disappeared (after error)!")
-                        return True
-                    
-                # Check if we reached the game
-                if "game.php" in page.url:
-                    logger.info("✅ Successfully reached game!")
-                    return True
-                    
-            except Exception as e:
-                logger.error(f"❌ Error solving captcha: {e}", exc_info=True)
-                await screenshot_manager.capture_captcha(page, f"login_exception_{attempt + 1}")
-                
-            # Wait before retry
-            if attempt < self.max_retries - 1:
-                logger.info(f"⏳ Waiting 5s before retry...")
-                await asyncio.sleep(5)
-                
-        logger.error("❌ Failed to solve captcha after all attempts")
-        await screenshot_manager.capture_captcha(page, "login_all_failed")
-        return await self._solve_manually(page)
+        finally:
+            # ALWAYS RESUME ANTI-DETECTION
+            if self.anti_detection:
+                self.anti_detection.resume()
+                logger.info("▶️ Anti-detection resumed after login captcha")
         
     async def _is_bot_protection_active(self, page: Page) -> bool:
         """Check if bot protection is still active"""

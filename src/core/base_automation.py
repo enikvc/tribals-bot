@@ -1,5 +1,5 @@
 """
-Base Automation Class - Updated with screenshot manager
+Base Automation Class - Updated with shared anti-detection manager
 """
 import asyncio
 import random
@@ -11,7 +11,6 @@ from datetime import datetime
 from playwright.async_api import Page
 
 from ..utils.logger import setup_logger
-from ..utils.anti_detection import HumanBehavior, SessionBehavior
 from ..utils.screenshot_manager import screenshot_manager
 
 logger = setup_logger(__name__)
@@ -28,8 +27,20 @@ class BaseAutomation(ABC):
         self.paused = False
         self.page: Optional[Page] = None
         self.attempts = 0
-        self.human = HumanBehavior()
-        self.session = SessionBehavior()
+        
+        # Use shared anti-detection manager from browser_manager
+        # This ensures all scripts share the same suspension state
+        if hasattr(browser_manager, 'captcha_detector') and browser_manager.captcha_detector:
+            self.anti_detection = browser_manager.captcha_detector.anti_detection_manager
+            self.human = self.anti_detection.human
+            self.session = self.anti_detection.session
+        else:
+            # Fallback if not initialized yet
+            from ..utils.anti_detection import AntiDetectionManager
+            self.anti_detection = AntiDetectionManager()
+            self.human = self.anti_detection.human
+            self.session = self.anti_detection.session
+            
         # Get village ID from environment or use default
         self.village_id = os.getenv('TRIBALS_VILLAGE_ID', '306')
         
@@ -67,22 +78,24 @@ class BaseAutomation(ABC):
                 self.build_url()
             )
             
-            # Add initial human-like delay
-            await self.human_delay(2000, 5000)
-            
-            # Initial random mouse movement
-            await self.human.random_mouse_movement(self.page, 1.5)
+            # Add initial human-like delay (only if not suspended)
+            if not self.anti_detection.is_suspended():
+                await self.human_delay(2000, 5000)
+                
+                # Initial random mouse movement
+                await self.human.random_mouse_movement(self.page, 1.5)
             
             # Run automation loop
             while self.running and self.is_within_active_hours():
                 try:
-                    # Check for scheduled breaks
-                    should_break, break_duration = self.session.should_take_break()
-                    if should_break:
-                        logger.info(f"☕ Taking a {break_duration}s break")
-                        await asyncio.sleep(break_duration)
-                        # Simulate return with mouse movement
-                        await self.human.random_mouse_movement(self.page, 2.0)
+                    # Check for scheduled breaks (only if not suspended)
+                    if not self.anti_detection.is_suspended():
+                        should_break, break_duration = self.session.should_take_break()
+                        if should_break:
+                            logger.info(f"☕ Taking a {break_duration}s break")
+                            await asyncio.sleep(break_duration)
+                            # Simulate return with mouse movement
+                            await self.human.random_mouse_movement(self.page, 2.0)
                         
                     await self.run_automation()
                 except Exception as e:
@@ -128,6 +141,11 @@ class BaseAutomation(ABC):
         
     async def human_delay(self, min_ms: int, max_ms: int):
         """Add human-like delay with fatigue adjustment"""
+        # If suspended, use minimal delay
+        if self.anti_detection.is_suspended():
+            await asyncio.sleep(0.1)
+            return
+            
         delay = self.human.get_human_delay(min_ms / 1000, max_ms / 1000)
         
         # Apply session activity multiplier
@@ -143,8 +161,8 @@ class BaseAutomation(ABC):
                 # Record action
                 self.session.record_action('click')
                 
-                # Random mouse activity before click
-                if random.random() < 0.3:
+                # Random mouse activity before click (only if not suspended)
+                if not self.anti_detection.is_suspended() and random.random() < 0.3:
                     await self.human.random_mouse_movement(self.page, 0.5)
                 
                 # Human-like click
@@ -153,8 +171,8 @@ class BaseAutomation(ABC):
                 if success:
                     logger.debug(f"🖱️ Clicked {selector}")
                     
-                    # Sometimes move mouse away after click
-                    if random.random() < 0.2:
+                    # Sometimes move mouse away after click (only if not suspended)
+                    if not self.anti_detection.is_suspended() and random.random() < 0.2:
                         await self.human.random_mouse_movement(self.page, 0.3)
                         
                 return success
@@ -172,13 +190,15 @@ class BaseAutomation(ABC):
                 
                 # Click before typing
                 await self.human.human_click(self.page, element)
-                await self.human.micro_pause()
+                
+                if not self.anti_detection.is_suspended():
+                    await self.human.micro_pause()
                 
                 # Human-like typing
                 await self.human.human_type(self.page, text)
                 
-                # Sometimes tab away
-                if random.random() < 0.1:
+                # Sometimes tab away (only if not suspended)
+                if not self.anti_detection.is_suspended() and random.random() < 0.1:
                     await self.page.keyboard.press('Tab')
                     
                 return True
@@ -193,8 +213,8 @@ class BaseAutomation(ABC):
             if element:
                 text = await element.text_content()
                 
-                # Simulate reading time
-                if text and len(text) > 20:
+                # Simulate reading time (only if not suspended)
+                if not self.anti_detection.is_suspended() and text and len(text) > 20:
                     await self.human.reading_pause(len(text))
                     
                 return text
@@ -214,6 +234,10 @@ class BaseAutomation(ABC):
         
     async def perform_random_actions(self):
         """Perform random human-like actions"""
+        # Skip if suspended
+        if self.anti_detection.is_suspended():
+            return
+            
         action = random.choice([
             'mouse_move',
             'scroll',
@@ -231,6 +255,10 @@ class BaseAutomation(ABC):
         
     async def simulate_page_scan(self):
         """Simulate scanning/reading a page"""
+        # Skip if suspended
+        if self.anti_detection.is_suspended():
+            return
+            
         # Move mouse around as if reading
         for _ in range(random.randint(2, 4)):
             x = random.randint(200, 1600)
