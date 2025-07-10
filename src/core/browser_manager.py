@@ -1,5 +1,5 @@
 """
-Browser Manager - Fixed to avoid refresh after login
+Browser Manager - Fixed to monitor all tabs and avoid refresh after login
 """
 import asyncio
 import os
@@ -117,7 +117,7 @@ class BrowserManager:
                 viewport=browser_config.get('viewport', {'width': 1440, 'height': 720}),
                 screen={'width': 1920, 'height': 1080},
                 user_agent=user_agent,
-                locale='en-US',
+                locale='it-IT',
                 timezone_id='Europe/Rome',
                 permissions=['geolocation', 'notifications'],
                 geolocation={'latitude': 41.9028, 'longitude': 12.4964},  # Rome
@@ -151,7 +151,7 @@ class BrowserManager:
                 viewport=browser_config.get('viewport', {'width': 1440, 'height': 720}),
                 screen={'width': 1920, 'height': 1080},
                 user_agent=user_agent,
-                locale='en-US',
+                locale='it-IT',
                 timezone_id='Europe/Rome',
                 permissions=['geolocation', 'notifications'],
                 geolocation={'latitude': 41.9028, 'longitude': 12.4964},  # Rome
@@ -243,6 +243,9 @@ class BrowserManager:
         
         # Start captcha detection monitoring
         asyncio.create_task(self.captcha_detector.start_monitoring())
+        
+        # Monitor for new tabs opened manually
+        asyncio.create_task(self._monitor_new_tabs())
         
         logger.info("✅ Browser initialized with authentic headers")
         
@@ -570,6 +573,51 @@ class BrowserManager:
                 logger.info("✅ Initial captcha solved!")
         else:
             logger.info("✅ No bot protection or captcha detected - safe to proceed")
+            
+    async def _monitor_new_tabs(self):
+        """Monitor for manually opened tabs"""
+        known_pages = set()
+        
+        # Add initial pages to known set
+        if self.main_context:
+            for page in self.main_context.pages:
+                known_pages.add(page)
+                
+        while True:
+            try:
+                if self.main_context:
+                    current_pages = set(self.main_context.pages)
+                    new_pages = current_pages - known_pages
+                    
+                    for page in new_pages:
+                        if not page.is_closed():
+                            logger.info(f"🆕 New tab detected: {page.url[:50]}...")
+                            known_pages.add(page)
+                            
+                            # Set up console logging for debugging
+                            page.on('console', lambda msg: self._handle_console_message('manual_tab', msg))
+                            
+                    # Remove closed pages from known set
+                    closed_pages = [p for p in known_pages if p.is_closed()]
+                    for page in closed_pages:
+                        known_pages.remove(page)
+                        
+                await asyncio.sleep(2)  # Check every 2 seconds
+                
+            except Exception as e:
+                logger.debug(f"Error monitoring new tabs: {e}")
+                await asyncio.sleep(5)
+    
+    def get_all_tribals_pages(self) -> list:
+        """Get all open Tribals pages (registered and unregistered)"""
+        pages = []
+        
+        if self.main_context:
+            for page in self.main_context.pages:
+                if not page.is_closed() and 'tribals.it' in page.url:
+                    pages.append(page)
+                    
+        return pages
             
     async def get_page(self, script_name: str, url: Optional[str] = None) -> Page:
         """Get or create a page for a script"""

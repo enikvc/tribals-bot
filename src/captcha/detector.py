@@ -1,5 +1,5 @@
 """
-Captcha Detector - Monitors for captcha challenges and manages anti-detection suspension
+Captcha Detector - Fixed to monitor ALL Tribals pages including manual tabs
 """
 import asyncio
 from typing import Set, Optional
@@ -33,17 +33,47 @@ class CaptchaDetector:
                     await asyncio.sleep(5)
                     continue
                     
-                # Check all open pages
-                for script_name, page in list(self.browser_manager.pages.items()):
-                    if not page.is_closed():
+                # Get ALL pages from the browser context, not just registered ones
+                all_pages = []
+                
+                # Get pages from main context
+                if self.browser_manager.main_context:
+                    for page in self.browser_manager.main_context.pages:
+                        if not page.is_closed() and 'tribals.it' in page.url:
+                            # Determine source name
+                            source_name = None
+                            # Check if it's a registered automation page
+                            for script_name, registered_page in self.browser_manager.pages.items():
+                                if registered_page == page:
+                                    source_name = script_name
+                                    break
+                            # If not registered, give it a descriptive name
+                            if not source_name:
+                                if hasattr(self.browser_manager, 'game_page') and page == self.browser_manager.game_page:
+                                    source_name = "main_game"
+                                elif 'game.php' in page.url:
+                                    source_name = "manual_tab"
+                                else:
+                                    source_name = "unknown_tab"
+                            
+                            all_pages.append((source_name, page))
+                
+                # Check all pages for captcha/bot protection
+                for source_name, page in all_pages:
+                    try:
                         # Check for bot protection page
                         if await self.check_for_bot_protection(page):
-                            await self.handle_bot_protection(script_name, page)
+                            logger.warning(f"🚨 Bot protection detected on {source_name} page")
+                            await self.handle_bot_protection(source_name, page)
                             break  # Handle one at a time
                         # Check for captcha
                         elif await self.check_page_for_captcha(page):
-                            await self.handle_captcha_detection(script_name, page)
+                            logger.warning(f"🚨 Captcha detected on {source_name} page")
+                            await self.handle_captcha_detection(source_name, page)
                             break  # Handle one at a time
+                    except Exception as e:
+                        logger.debug(f"Error checking page {source_name}: {e}")
+                        continue
                             
                 await asyncio.sleep(2)  # Check every 2 seconds
                 
@@ -128,13 +158,13 @@ class CaptchaDetector:
             
         return False
         
-    async def handle_bot_protection(self, script_name: str, page: Page):
+    async def handle_bot_protection(self, source_name: str, page: Page):
         """Handle bot protection page"""
         if self.detected_captcha:
             return  # Already handling
             
         self.detected_captcha = True
-        logger.error(f"🚨 BOT PROTECTION PAGE DETECTED on {script_name}!")
+        logger.error(f"🚨 BOT PROTECTION PAGE DETECTED on {source_name}!")
         
         # SUSPEND ANTI-DETECTION BEFORE SOLVING
         self.anti_detection_manager.suspend("bot_protection")
@@ -150,7 +180,7 @@ class CaptchaDetector:
         # Pause all automations (don't stop them completely to keep pages open)
         scheduler = getattr(self.browser_manager, 'scheduler', None)
         if scheduler:
-            await scheduler.pause_all_automations("Bot protection detected")
+            await scheduler.pause_all_automations(f"Bot protection detected on {source_name}")
             
         try:
             # Use solver to handle bot protection on the current page
@@ -178,13 +208,13 @@ class CaptchaDetector:
             self.detected_captcha = False  # Reset to allow retry
             self.anti_detection_manager.resume()  # Always resume
             
-    async def handle_captcha_detection(self, script_name: str, page: Page):
+    async def handle_captcha_detection(self, source_name: str, page: Page):
         """Handle captcha detection"""
         if self.detected_captcha:
             return  # Already handling
             
         self.detected_captcha = True
-        logger.error(f"🚨 CAPTCHA DETECTED on {script_name} page!")
+        logger.error(f"🚨 CAPTCHA DETECTED on {source_name} page!")
         
         # SUSPEND ANTI-DETECTION BEFORE SOLVING
         self.anti_detection_manager.suspend("captcha")
@@ -195,7 +225,7 @@ class CaptchaDetector:
         # Pause all automations (don't stop them completely)
         scheduler = getattr(self.browser_manager, 'scheduler', None)
         if scheduler:
-            await scheduler.pause_all_automations("Captcha detected")
+            await scheduler.pause_all_automations(f"Captcha detected on {source_name}")
             
         try:
             # Try to solve captcha
