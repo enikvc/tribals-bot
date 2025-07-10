@@ -296,17 +296,6 @@ class CaptchaSolver:
         # Capture initial state
         await screenshot_manager.capture_captcha(page, "login_initial")
         
-        # Get direct play URL from config
-        server_url = self.config.get('server', {}).get('base_url', 'https://it94.tribals.it')
-        import re
-        match = re.search(r'https://([a-z]+)(\d+)\.tribals\.([a-z.]+)', server_url)
-        if match:
-            server_prefix = match.group(1)
-            server_number = match.group(2)
-            direct_play_url = f"https://www.tribals.it/page/play/{server_prefix}{server_number}"
-        else:
-            direct_play_url = "https://www.tribals.it/page/play/it94"
-        
         try:
             if not HCAPTCHA_AVAILABLE or not self.gemini_api_key or self.force_manual:
                 logger.warning("⚠️ Automatic solving not available or disabled, using manual")
@@ -319,6 +308,9 @@ class CaptchaSolver:
             if await self.is_multi_challenge(page):
                 logger.warning("🔄 Multi-challenge captcha detected")
                 return await self._solve_manually_login(page)
+            
+            # Check if captcha is already active (from previous attempt)
+            captcha_already_active = await self._is_captcha_challenge_present(page)
             
             for attempt in range(self.max_retries):
                 try:
@@ -348,16 +340,22 @@ class CaptchaSolver:
                     
                     async def click_login_as_checkbox():
                         """Click login button instead of checkbox"""
-                        logger.info("🎯 Clicking login button (as checkbox workaround)...")
-                        login_btn = await page.query_selector('a.btn-login')
-                        if login_btn:
-                            await login_btn.click()
-                            logger.info("✅ Clicked login button via workaround")
-                            # Wait for challenge to appear
-                            await asyncio.sleep(2)
+                        # Only click if captcha not already active
+                        if not captcha_already_active:
+                            logger.info("🎯 Clicking login button (as checkbox workaround)...")
+                            login_btn = await page.query_selector('a.btn-login')
+                            if login_btn:
+                                await login_btn.click()
+                                logger.info("✅ Clicked login button via workaround")
+                                # Wait for challenge to appear
+                                await asyncio.sleep(2)
+                            else:
+                                logger.error("❌ Login button not found for workaround")
+                                raise Exception("Login button not found")
                         else:
-                            logger.error("❌ Login button not found for workaround")
-                            raise Exception("Login button not found")
+                            logger.info("🎯 Captcha already active, skipping login button click")
+                            # Just wait a bit
+                            await asyncio.sleep(1)
                     
                     # Replace the checkbox click method
                     agent.robotic_arm.click_checkbox = click_login_as_checkbox
@@ -370,37 +368,21 @@ class CaptchaSolver:
                         # Wait for and solve challenge
                         result = await asyncio.wait_for(
                             agent.wait_for_challenge(),
-                            timeout=120
+                            timeout=180  # Increased to 3 minutes for multi-challenges
                         )
                         logger.info(f"📊 Challenge result: {result}")
                         
                         # Check if successful
                         if result == ChallengeSignal.SUCCESS:
                             logger.info("✅ Challenge solved successfully!")
-                            
-                            # After solving captcha, navigate to game
-                            await asyncio.sleep(2)
-                            
-                            logger.info(f"🔄 Navigating to game: {direct_play_url}")
-                            
-                            try:
-                                await page.goto(direct_play_url, wait_until='domcontentloaded', timeout=30000)
-                                await asyncio.sleep(3)
-                                
-                                if "game.php" in page.url:
-                                    logger.info("✅ Successfully logged in and entered game!")
-                                    return True
-                                else:
-                                    await asyncio.sleep(5)
-                                    if "game.php" in page.url:
-                                        logger.info("✅ Login successful!")
-                                        return True
-                                        
-                            except Exception as e:
-                                logger.error(f"❌ Error navigating after captcha: {e}")
-                                
+                            # Just return true - let login handler handle navigation
+                            return True
                         else:
                             logger.warning(f"⚠️ Challenge not successful: {result}")
+                            # Check if it became multi-challenge
+                            if await self.is_multi_challenge(page):
+                                logger.warning("🔄 Captcha became multi-challenge during solve")
+                                return await self._solve_manually_login(page)
                             
                     except asyncio.TimeoutError:
                         logger.warning("⏱️ Challenge timeout")
@@ -416,6 +398,9 @@ class CaptchaSolver:
                 if 'original_click_checkbox' in locals():
                     agent.robotic_arm.click_checkbox = original_click_checkbox
                     
+                # Update captcha state for next attempt
+                captcha_already_active = await self._is_captcha_challenge_present(page)
+                
                 # Wait before retry
                 if attempt < self.max_retries - 1:
                     logger.info(f"⏳ Waiting 5s before retry...")

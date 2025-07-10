@@ -59,7 +59,7 @@ session:
   cookies:
     # These will be set automatically after login
     cid: ""
-    locale: "it_IT"
+    locale: "en-US"
     mobile_mapsize: "14x16"
     global_village_id: "306"
     websocket_available: "true"

@@ -117,7 +117,7 @@ class BrowserManager:
                 viewport=browser_config.get('viewport', {'width': 1440, 'height': 720}),
                 screen={'width': 1920, 'height': 1080},
                 user_agent=user_agent,
-                locale='it-IT',
+                locale='en-US',
                 timezone_id='Europe/Rome',
                 permissions=['geolocation', 'notifications'],
                 geolocation={'latitude': 41.9028, 'longitude': 12.4964},  # Rome
@@ -151,7 +151,7 @@ class BrowserManager:
                 viewport=browser_config.get('viewport', {'width': 1440, 'height': 720}),
                 screen={'width': 1920, 'height': 1080},
                 user_agent=user_agent,
-                locale='it-IT',
+                locale='en-US',
                 timezone_id='Europe/Rome',
                 permissions=['geolocation', 'notifications'],
                 geolocation={'latitude': 41.9028, 'longitude': 12.4964},  # Rome
