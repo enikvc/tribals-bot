@@ -3,6 +3,8 @@ Browser Manager - Optimized with enhanced stealth and bug fixes
 """
 import asyncio
 import os
+import sys
+import subprocess
 import json
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Set
@@ -172,6 +174,54 @@ class BrowserManager:
             }
         }
         
+    def _get_chrome_path(self) -> Optional[str]:
+
+        chrome_paths = {
+            'linux': [
+                '/usr/bin/google-chrome',
+                '/usr/bin/google-chrome-stable',
+                '/usr/bin/chrome',
+                '/opt/google/chrome/google-chrome',
+                '/snap/bin/chromium'  # Snap package
+            ],
+            'darwin': [  # macOS
+                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                '/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta',
+                '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary'
+            ],
+            'win32': [  # Windows
+                'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+                'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+                os.path.expandvars('%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe'),
+                os.path.expandvars('%PROGRAMFILES%\\Google\\Chrome\\Application\\chrome.exe'),
+                os.path.expandvars('%PROGRAMFILES(X86)%\\Google\\Chrome\\Application\\chrome.exe')
+            ]
+        }
+        
+        platform = sys.platform
+        paths = chrome_paths.get(platform, chrome_paths['linux'])
+        
+        for path in paths:
+            if os.path.exists(path):
+                logger.info(f"✅ Found Chrome at: {path}")
+                return path
+                
+        # Try to find Chrome using 'which' command on Unix-like systems
+        if platform != 'win32':
+            try:
+                result = subprocess.run(['which', 'google-chrome'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    path = result.stdout.strip()
+                    if path and os.path.exists(path):
+                        logger.info(f"✅ Found Chrome via which: {path}")
+                        return path
+            except:
+                pass
+                
+        logger.warning("⚠️ Chrome not found, will use Chromium")
+        return None
+
+    # Update the initialize method to use Chrome detection:
     async def initialize(self):
         """Initialize Playwright and browser with enhanced stealth"""
         if self._initialized:
@@ -187,14 +237,29 @@ class BrowserManager:
             stealth_args = self._get_stealth_args()
             context_options = self._get_context_options()
             
+            # Detect Chrome path
+            chrome_path = self._get_chrome_path()
+            launch_options = {
+                'headless': browser_config.get('headless', False),
+                'slow_mo': browser_config.get('slow_mo', 0),
+                'args': stealth_args
+            }
+            
+            # Use Chrome if found, otherwise fallback to Chromium
+            if chrome_path:
+                launch_options['executable_path'] = chrome_path
+                logger.info(f"🌐 Using Google Chrome from: {chrome_path}")
+            else:
+                # Use channel to let Playwright find Chrome
+                launch_options['channel'] = 'chrome'
+                logger.info("🌐 Using Chrome via channel (Playwright will find it)")
+            
             if self.incognito_mode:
                 logger.info("🥷 Launching in incognito mode...")
                 # Launch browser in incognito
                 self.browser = await self.playwright.chromium.launch(
-                    headless=browser_config.get('headless', False),
-                    slow_mo=browser_config.get('slow_mo', 0),
-                    args=['--incognito'] + stealth_args,
-                    channel='chrome' if os.path.exists('/usr/bin/google-chrome') else None
+                    **launch_options,
+                    args=['--incognito'] + stealth_args
                 )
                 
                 # Create incognito context
@@ -204,10 +269,7 @@ class BrowserManager:
                 # Launch persistent context
                 self.main_context = await self.playwright.chromium.launch_persistent_context(
                     user_data_dir=str(self.user_data_dir.absolute()),
-                    headless=browser_config.get('headless', False),
-                    slow_mo=browser_config.get('slow_mo', 0),
-                    args=stealth_args,
-                    channel='chrome' if os.path.exists('/usr/bin/google-chrome') else None,
+                    **launch_options,
                     **context_options
                 )
             
