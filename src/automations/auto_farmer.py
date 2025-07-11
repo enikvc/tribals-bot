@@ -386,7 +386,7 @@ class AutoFarmer(BaseAutomation):
     async def click_farm_icons(self, icons: List):
         """Click farm icons with rate limiting and error handling"""
         max_icons = self.script_config.get('max_icons_per_run', 50)
-        icons_to_click = icons[:max_icons]
+        icons_to_click = icons
         
         click_interval = max(self.script_config['icon_click_interval'], 250) / 1000
         

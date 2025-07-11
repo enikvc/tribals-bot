@@ -61,7 +61,7 @@ session:
     cid: ""
     locale: "en-US"
     mobile_mapsize: "14x16"
-    global_village_id: "306"
+    global_village_id: ""
     websocket_available: "true"
   
 # Automation Scripts Configuration
@@ -79,7 +79,6 @@ scripts:
     plan_delay: 700
     icon_start_delay: 1000
     icon_click_interval: 300
-    max_icons_per_run: 50
     
   auto_scavenger:
     enabled: true
