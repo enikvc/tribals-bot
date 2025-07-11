@@ -1,7 +1,37 @@
+# Sleep Mode Configuration
+sleep_mode:
+  enabled: true
+  close_browser: true  # Completely close browser during sleep
+  wake_buffer: 300  # Wake up 5 minutes before active hours (seconds)
+  sleep_buffer: 300  # Go to sleep 5 minutes after inactive hours (seconds)
+  
+  # Optional: Different schedule for weekends
+  weekend_override:
+    enabled: true
+    start: 9  # 9:00 AM
+    end: 3     # 3:00 AM
+    
+  # Browser restart settings
+  restart:
+    delay_after_close: 5  # Seconds to wait after closing before marking as complete
+    delay_before_open: 5  # Seconds to wait before reopening browser
+    max_retries: 3  # Max retries if browser fails to restart
+    
+  # Notifications
+  notifications:
+    on_sleep: true
+    on_wake: true
+    include_duration: true
+    
 # Global Configuration
 active_hours:
   start: 8  # 8:00 AM
-  end: 3    # 3:00 AM (next day)
+  end: 2    # 2:00 AM (next day)
+  
+  # Optional: Randomize start/end times slightly for more human behavior
+  randomize:
+    enabled: true
+    max_variance: 15  # minutes
 
 debug_mode: false
 discord_webhook: ""

@@ -1,21 +1,22 @@
 """
-Scheduler - Manages automation lifecycle
+Scheduler - Updated with sleep mode that closes browser during inactive hours
 """
 import asyncio
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..automations.auto_buyer import AutoBuyer
 from ..automations.auto_farmer import AutoFarmer
 from ..automations.auto_scavenger import AutoScavenger
 from ..utils.logger import setup_logger
 from ..utils.discord_webhook import DiscordNotifier
+from ..utils.helpers import time_until_hour
 
 logger = setup_logger(__name__)
 
 
 class Scheduler:
-    """Manages all automation scripts"""
+    """Manages all automation scripts with sleep mode"""
     
     def __init__(self, config: Dict[str, Any], browser_manager):
         self.config = config
@@ -33,6 +34,7 @@ class Scheduler:
         self.running = False
         self.emergency_stopped = False
         self.paused = False
+        self.in_sleep_mode = False
         
     async def start(self):
         """Start the scheduler"""
@@ -41,12 +43,16 @@ class Scheduler:
         self.paused = False
         logger.info("📅 Scheduler started")
         
-        # Add a small delay to ensure captcha detector is fully initialized
-        logger.info("⏳ Waiting for captcha detector initialization...")
-        await asyncio.sleep(3)
-        
-        # Start enabled automations
-        await self.start_enabled_automations()
+        # Check if we should start in sleep mode
+        if not self.is_within_active_hours():
+            await self.enter_sleep_mode()
+        else:
+            # Add a small delay to ensure captcha detector is fully initialized
+            logger.info("⏳ Waiting for captcha detector initialization...")
+            await asyncio.sleep(3)
+            
+            # Start enabled automations
+            await self.start_enabled_automations()
         
         # Monitor active hours
         asyncio.create_task(self.monitor_active_hours())
@@ -56,12 +62,91 @@ class Scheduler:
         self.running = False
         logger.info("📅 Stopping scheduler...")
         
+        # Exit sleep mode if active
+        if self.in_sleep_mode:
+            await self.exit_sleep_mode()
+        
         # Stop all automations
         for name, automation in self.automations.items():
             if automation.running:
                 await automation.stop()
                 
         logger.info("📅 Scheduler stopped")
+        
+    async def enter_sleep_mode(self):
+        """Enter sleep mode - close browser completely"""
+        if self.in_sleep_mode:
+            return
+            
+        logger.info("😴 Entering sleep mode - closing browser...")
+        self.in_sleep_mode = True
+        
+        try:
+            # Stop all running automations first
+            await self.stop_all_automations()
+            
+            # Give automations time to clean up
+            await asyncio.sleep(2)
+            
+            # Close the browser completely
+            if self.browser_manager:
+                await self.browser_manager.close_browser_for_sleep()
+            
+            # Calculate wake time
+            start_hour = self.config['active_hours']['start']
+            sleep_duration = time_until_hour(start_hour)
+            wake_time = datetime.now() + timedelta(seconds=sleep_duration)
+            
+            logger.info(f"💤 Browser closed. Sleeping until {wake_time.strftime('%H:%M:%S')}")
+            
+            # Send Discord notification
+            await self.discord.send_alert(
+                "😴 Bot Sleeping",
+                f"Bot entered sleep mode. Will wake at {wake_time.strftime('%H:%M:%S')}\n"
+                f"Sleep duration: {sleep_duration // 3600}h {(sleep_duration % 3600) // 60}m"
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Error entering sleep mode: {e}", exc_info=True)
+            self.in_sleep_mode = False
+            
+    async def exit_sleep_mode(self):
+        """Exit sleep mode - restart browser and automations"""
+        if not self.in_sleep_mode:
+            return
+            
+        logger.info("🌅 Exiting sleep mode - restarting browser...")
+        
+        try:
+            # Send wake notification
+            await self.discord.send_success(
+                "☀️ Bot Waking Up", 
+                "Bot is waking from sleep mode. Reinitializing browser..."
+            )
+            
+            # Reinitialize browser
+            await self.browser_manager.reinitialize_after_sleep()
+            
+            # Wait for browser to be ready
+            await asyncio.sleep(5)
+            
+            # Start enabled automations
+            await self.start_enabled_automations()
+            
+            self.in_sleep_mode = False
+            logger.info("✅ Successfully exited sleep mode")
+            
+            # Send ready notification
+            await self.discord.send_success(
+                "✅ Bot Active",
+                "Bot is now active and automations are running"
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Error exiting sleep mode: {e}", exc_info=True)
+            await self.discord.send_error("Failed to exit sleep mode", str(e))
+            # Keep in sleep mode if we can't restart
+            self.in_sleep_mode = True
         
     async def pause_all_automations(self, reason: str):
         """Pause all automations without stopping them (keeps pages open)"""
@@ -133,7 +218,7 @@ class Scheduler:
         
     async def start_enabled_automations(self):
         """Start all enabled automations"""
-        if self.emergency_stopped or self.paused:
+        if self.emergency_stopped or self.paused or self.in_sleep_mode:
             return
             
         for name, automation in self.automations.items():
@@ -146,7 +231,7 @@ class Scheduler:
                     logger.info(f"⏰ {name} enabled but outside active hours")
                     
     async def monitor_active_hours(self):
-        """Monitor and enforce active hours"""
+        """Monitor and enforce active hours with sleep mode"""
         last_active = self.is_within_active_hours()
         
         while self.running:
@@ -155,11 +240,13 @@ class Scheduler:
                 
                 if current_active != last_active:
                     if current_active:
+                        # Wake up
                         logger.info("🌅 Active hours started")
-                        await self.start_enabled_automations()
+                        await self.exit_sleep_mode()
                     else:
+                        # Go to sleep
                         logger.info("🌙 Active hours ended")
-                        await self.stop_all_automations()
+                        await self.enter_sleep_mode()
                         
                     last_active = current_active
                     

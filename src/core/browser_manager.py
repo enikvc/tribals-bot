@@ -78,7 +78,7 @@ class BrowserManager:
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--single-process',
+            # '--single-process',
             '--disable-gpu',
             
             # Privacy and security
@@ -964,3 +964,89 @@ class BrowserManager:
             
         except Exception as e:
             logger.error(f"Error during cleanup: {e}", exc_info=True)
+
+    async def close_browser_for_sleep(self):
+        """Close browser completely for sleep mode"""
+        logger.info("🛌 Closing browser for sleep mode...")
+        
+        try:
+            # Stop all monitoring first
+            if self._monitor_task:
+                self._monitor_task.cancel()
+                try:
+                    await self._monitor_task
+                except asyncio.CancelledError:
+                    pass
+                    
+            # Stop captcha detector
+            if hasattr(self, 'captcha_detector'):
+                self.captcha_detector.stop()
+            
+            # Close all pages
+            logger.info("📑 Closing all pages...")
+            for name in list(self.pages.keys()):
+                await self.close_page(name)
+                
+            # Close any remaining pages in context
+            if self.main_context:
+                remaining_pages = list(self.main_context.pages)
+                for page in remaining_pages:
+                    try:
+                        if not page.is_closed():
+                            await page.close()
+                    except:
+                        pass
+                        
+            # Close context
+            if self.main_context:
+                logger.info("🔌 Closing browser context...")
+                await self.main_context.close()
+                self.main_context = None
+                
+            # Close browser (for incognito mode)
+            if self.incognito_mode and self.browser:
+                logger.info("🔌 Closing incognito browser...")
+                await self.browser.close()
+                self.browser = None
+                
+            # Stop playwright
+            if self.playwright:
+                logger.info("🎭 Stopping playwright...")
+                await self.playwright.stop()
+                self.playwright = None
+                
+            self._initialized = False
+            self._known_pages.clear()
+            self.pages.clear()
+            self.game_page = None
+            
+            logger.info("✅ Browser closed for sleep mode")
+            
+        except Exception as e:
+            logger.error(f"❌ Error closing browser for sleep: {e}", exc_info=True)
+            # Force cleanup
+            self._initialized = False
+            self.playwright = None
+            self.browser = None
+            self.main_context = None
+            
+    async def reinitialize_after_sleep(self):
+        """Reinitialize browser after sleep mode"""
+        logger.info("🔄 Reinitializing browser after sleep...")
+        
+        try:
+            # Make sure everything is cleaned up first
+            if self._initialized:
+                await self.cleanup()
+                
+            # Wait a bit to ensure clean state
+            await asyncio.sleep(2)
+            
+            # Reinitialize
+            await self.initialize()
+            
+            logger.info("✅ Browser reinitialized successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to reinitialize browser: {e}", exc_info=True)
+            raise
