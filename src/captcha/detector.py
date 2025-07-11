@@ -202,6 +202,8 @@ class CaptchaDetector:
             
             if success:
                 logger.info("✅ Bot protection passed successfully!")
+                # RELOAD ALL TRIBALS PAGES to clear bot protection notifications
+                await self.reload_all_tribals_pages(exclude_page=page)
                 self.detected_captcha = False
                 
                 # RESUME ANTI-DETECTION AFTER SOLVING
@@ -265,3 +267,47 @@ class CaptchaDetector:
             logger.error(f"❌ Error handling captcha: {e}", exc_info=True)
             self.detected_captcha = False  # Reset to allow retry
             self.anti_detection_manager.resume()  # Always resume
+
+    async def reload_all_tribals_pages(self, exclude_page: Optional[Page] = None):
+        """Reload all Tribals pages to clear bot protection notifications"""
+        logger.info("🔄 Reloading all Tribals pages to clear bot protection...")
+        
+        try:
+            # Get all pages from the browser context
+            if self.browser_manager.main_context:
+                pages_to_reload = []
+                
+                # Collect all Tribals pages
+                for page in self.browser_manager.main_context.pages:
+                    try:
+                        if (not page.is_closed() and 
+                            'tribals.it' in page.url and 
+                            page != exclude_page):  # Don't reload the page we just solved on
+                            pages_to_reload.append(page)
+                    except:
+                        pass
+                
+                # Reload each page
+                for page in pages_to_reload:
+                    try:
+                        current_url = page.url
+                        logger.debug(f"🔄 Reloading page: {current_url[:50]}...")
+                        
+                        # Simply reload the page
+                        await page.reload(wait_until='domcontentloaded', timeout=10000)
+                        
+                        # Small delay between reloads
+                        await asyncio.sleep(0.5)
+                        
+                    except Exception as e:
+                        logger.debug(f"Could not reload page: {e}")
+                        continue
+                
+                logger.info(f"✅ Reloaded {len(pages_to_reload)} Tribals pages")
+                
+                # Wait a bit for all pages to settle
+                await asyncio.sleep(2)
+                
+        except Exception as e:
+            logger.error(f"Error reloading Tribals pages: {e}")
+            # Non-critical error, continue anyway

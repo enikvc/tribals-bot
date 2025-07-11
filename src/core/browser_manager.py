@@ -739,7 +739,7 @@ class StealthBrowserManager:
                 window.Notification.prototype = OriginalNotification.prototype;
             }
             
-            # WebGL - Force enable and patch all methods
+            // WebGL - Force enable and patch all methods
             try {
                 // First, ensure WebGL is available
                 if (!window.WebGLRenderingContext) {
