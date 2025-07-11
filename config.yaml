@@ -48,8 +48,8 @@ browser:
   slow_mo: 0
   user_data_dir: "./browser_data"
   viewport:
-    width: 1440
-    height: 690
+    width: 1600
+    height: 900
   # Authentic Chrome settings
   chrome_version: "138"
   platform: "macOS"

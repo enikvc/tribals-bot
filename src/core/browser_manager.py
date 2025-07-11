@@ -217,9 +217,10 @@ class StealthBrowserManager:
             '--disable-default-apps',
             
             # Window settings
-            '--window-size=1920,1080',
-            '--window-position=0,0',
             '--start-maximized',
+            '--disable-features=TranslateUI,BlinkGenPropertyTrees,IsolateOrigins,site-per-process,WindowOcclusionTracking',
+            '--disable-session-crashed-bubble',
+            '--disable-features=CalculateNativeWinOcclusion',
             
             # WebGL support - CRITICAL
             '--use-gl=angle',  # Use ANGLE for better WebGL support
@@ -325,7 +326,7 @@ class StealthBrowserManager:
         system_locale = system_locale.replace('_', '-')
         
         # Browser viewport (slightly smaller than screen)
-        viewport_width = min(1440, screen_width - 100)
+        viewport_width = min(1600, screen_width - 100)
         viewport_height = min(900, screen_height - 100)
         
         return {
