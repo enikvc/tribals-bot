@@ -217,16 +217,23 @@ class Scheduler:
             )
         
     async def start_enabled_automations(self):
-        """Start all enabled automations"""
+        """Start all enabled automations with delay between each"""
         if self.emergency_stopped or self.paused or self.in_sleep_mode:
             return
             
+        started_count = 0
         for name, automation in self.automations.items():
             script_config = self.config['scripts'].get(name, {})
             if script_config.get('enabled', False) and not automation.running:
                 if self.is_within_active_hours():
                     logger.info(f"🚀 Starting {name}")
                     asyncio.create_task(automation.start())
+                    started_count += 1
+                    
+                    # Add 2.5 second delay between automation starts
+                    if started_count > 0:
+                        logger.info(f"⏳ Waiting 2.5s before starting next automation...")
+                        await asyncio.sleep(2.5)
                 else:
                     logger.info(f"⏰ {name} enabled but outside active hours")
                     

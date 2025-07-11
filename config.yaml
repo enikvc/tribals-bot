@@ -104,7 +104,7 @@ scripts:
     check_interval: 5000
     
   auto_farmer:
-    enabled: true
+    enabled: false
     interval_seconds: 1200
     plan_delay: 700
     icon_start_delay: 1000
