@@ -1,11 +1,13 @@
 """
-Browser Manager - Optimized with enhanced stealth and bug fixes
+Browser Manager - Enhanced Stealth Mode with Real Chrome
 """
 import asyncio
 import os
 import sys
+import platform
 import subprocess
 import json
+import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Set
 from datetime import datetime
@@ -21,8 +23,8 @@ from .login_handler import LoginHandler
 logger = setup_logger(__name__)
 
 
-class BrowserManager:
-    """Manages browser instances with enhanced stealth and persistence"""
+class StealthBrowserManager:
+    """Ultra-stealth browser manager using real Chrome installation"""
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -32,7 +34,7 @@ class BrowserManager:
         self.contexts: Dict[str, BrowserContext] = {}
         self.pages: Dict[str, Page] = {}
         self.game_page: Optional[Page] = None
-        self.scheduler = None  # Will be set by scheduler
+        self.scheduler = None
         
         # Initialize components
         self.anti_detection_manager = AntiDetectionManager()
@@ -45,666 +47,1242 @@ class BrowserManager:
         self._monitor_task: Optional[asyncio.Task] = None
         self._initialized = False
         
-        # Setup persistent data directory
+        # Get real Chrome profile path
+        self.chrome_profile_path = self._get_chrome_profile_path()
         self.user_data_dir = Path(config.get('browser', {}).get('user_data_dir', './browser_data'))
         self.incognito_mode = os.getenv('INCOGNITO_MODE', 'false').lower() == 'true'
-        self._ensure_data_directory()
         
-    def _ensure_data_directory(self):
-        """Ensure browser data directory exists with proper structure"""
-        if not self.incognito_mode:
-            # Create main directory
-            self.user_data_dir.mkdir(exist_ok=True, parents=True)
+        # Prepare profile
+        self._prepare_browser_profile()
+        
+    def _get_chrome_profile_path(self) -> Path:
+        """Get the real Chrome user profile path"""
+        system = platform.system()
+        home = Path.home()
+        
+        if system == "Windows":
+            return home / "AppData" / "Local" / "Google" / "Chrome" / "User Data"
+        elif system == "Darwin":  # macOS
+            return home / "Library" / "Application Support" / "Google" / "Chrome"
+        else:  # Linux
+            return home / ".config" / "google-chrome"
             
-            # Create subdirectories for Chrome profile
-            subdirs = ['Default', 'Default/Cache', 'Default/Local Storage', 'Default/Session Storage']
-            for subdir in subdirs:
-                (self.user_data_dir / subdir).mkdir(exist_ok=True, parents=True)
+    def _prepare_browser_profile(self):
+        """Prepare browser profile by copying from real Chrome"""
+        if self.incognito_mode:
+            logger.info("🥷 Incognito mode - no profile preparation needed")
+            return
+            
+        # Create user data directory
+        self.user_data_dir.mkdir(exist_ok=True, parents=True)
+        
+        # Check if we already have a profile
+        default_profile = self.user_data_dir / "Default"
+        if default_profile.exists() and (default_profile / "Preferences").exists():
+            logger.info("✅ Browser profile already exists")
+            return
+            
+        # Copy essential files from real Chrome profile
+        logger.info("📁 Preparing browser profile from real Chrome...")
+        
+        try:
+            if self.chrome_profile_path.exists():
+                # Create Default profile directory
+                default_profile.mkdir(exist_ok=True, parents=True)
                 
-            logger.info(f"📁 Browser data directory: {self.user_data_dir.absolute()}")
-        else:
-            logger.info("🥷 Incognito mode - no persistent storage")
+                # Essential files to copy (without sensitive data)
+                files_to_copy = [
+                    "Preferences",
+                    "Local State"
+                ]
+                
+                # Copy files
+                for file_name in files_to_copy:
+                    src = self.chrome_profile_path / "Default" / file_name
+                    if src.exists():
+                        dst = default_profile / file_name
+                        shutil.copy2(src, dst)
+                        logger.debug(f"✅ Copied {file_name}")
+                        
+                # Modify preferences to remove personal data but keep settings
+                self._clean_preferences(default_profile / "Preferences")
+                
+                logger.info("✅ Browser profile prepared successfully")
+            else:
+                logger.warning("⚠️ Chrome profile not found, creating new profile")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not copy Chrome profile: {e}")
             
+    def _clean_preferences(self, pref_file: Path):
+        """Clean preferences file to remove personal data"""
+        if not pref_file.exists():
+            return
+            
+        try:
+            with open(pref_file, 'r', encoding='utf-8') as f:
+                prefs = json.load(f)
+                
+            # Remove personal data but keep browser settings
+            sensitive_keys = [
+                'account_info',
+                'autofill',
+                'credentials_enable_service',
+                'credentials_enable_autosignin',
+                'profile',
+                'signin',
+                'sync'
+            ]
+            
+            for key in sensitive_keys:
+                prefs.pop(key, None)
+                
+            # Ensure webdriver is not detected
+            if 'webdriver' in prefs:
+                del prefs['webdriver']
+                
+            # Write back
+            with open(pref_file, 'w', encoding='utf-8') as f:
+                json.dump(prefs, f, indent=2)
+                
+        except Exception as e:
+            logger.debug(f"Could not clean preferences: {e}")
+            
+    def _get_real_chrome_path(self) -> Optional[str]:
+        """Get the actual Chrome executable path"""
+        system = platform.system()
+        
+        if system == "Windows":
+            paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+                os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"),
+                os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe")
+            ]
+        elif system == "Darwin":  # macOS
+            paths = [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta",
+                "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+                os.path.expanduser("~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+            ]
+        else:  # Linux
+            paths = [
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/google-chrome-beta",
+                "/usr/bin/google-chrome-unstable",
+                "/opt/google/chrome/google-chrome",
+                "/usr/local/bin/google-chrome",
+                shutil.which("google-chrome"),
+                shutil.which("google-chrome-stable")
+            ]
+            
+        # Find the first existing path
+        for path in paths:
+            if path and os.path.exists(path):
+                logger.info(f"✅ Found Chrome at: {path}")
+                return path
+                
+        # Try to find using 'which' or 'where' command
+        try:
+            if system == "Windows":
+                result = subprocess.run(['where', 'chrome'], capture_output=True, text=True)
+            else:
+                result = subprocess.run(['which', 'google-chrome'], capture_output=True, text=True)
+                
+            if result.returncode == 0 and result.stdout.strip():
+                path = result.stdout.strip().split('\n')[0]
+                if os.path.exists(path):
+                    logger.info(f"✅ Found Chrome via command: {path}")
+                    return path
+        except:
+            pass
+            
+        logger.error("❌ Chrome executable not found!")
+        return None
+        
     def _get_stealth_args(self) -> List[str]:
-        """Get comprehensive stealth arguments for Chrome"""
-        return [
-            # Critical: Hide automation
+        """Get ultra-stealth arguments for Chrome"""
+        args = [
+            # Critical stealth flags
             '--disable-blink-features=AutomationControlled',
+            '--disable-features=AutomationControlled',
             '--exclude-switches=enable-automation',
             '--disable-infobars',
             
-            # Performance and stability
+            # Disable automation extension
+            '--disable-extensions-except=',
+            '--disable-default-apps',
+            
+            # Window settings
+            '--window-size=1920,1080',
+            '--window-position=0,0',
+            '--start-maximized',
+            
+            # WebGL support - CRITICAL
+            '--use-gl=angle',  # Use ANGLE for better WebGL support
+            '--use-angle=gl',
+            '--enable-webgl',
+            '--enable-webgl2',
+            '--ignore-gpu-blocklist',
+            '--enable-gpu-rasterization',
+            '--enable-accelerated-2d-canvas',
+            '--enable-unsafe-webgpu',
+            
+            # Performance and rendering
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            # '--single-process',
-            '--disable-gpu',
+            '--disable-software-rasterizer',
+            '--disable-dev-tools',
             
-            # Privacy and security
-            '--disable-web-security',
-            '--disable-features=IsolateOrigins,site-per-process',
-            '--allow-running-insecure-content',
-            '--ignore-certificate-errors',
-            '--ignore-certificate-errors-spki-list',
-            
-            # Disable unwanted features
+            # Features to disable
+            '--disable-features=TranslateUI,BlinkGenPropertyTrees,IsolateOrigins,site-per-process',
+            '--disable-ipc-flooding-protection',
             '--disable-background-timer-throttling',
             '--disable-backgrounding-occluded-windows',
             '--disable-renderer-backgrounding',
-            '--disable-features=TranslateUI',
-            '--disable-features=BlinkGenPropertyTrees',
-            '--disable-ipc-flooding-protection',
-            '--disable-default-apps',
-            '--disable-extensions',
-            '--disable-component-extensions-with-background-pages',
-            '--disable-background-networking',
-            '--disable-sync',
-            '--metrics-recording-only',
-            '--disable-features=ImprovedCookieControls,LazyFrameLoading,GlobalMediaControls',
             '--disable-hang-monitor',
             '--disable-prompt-on-repost',
+            '--disable-sync',
             '--disable-domain-reliability',
-            '--disable-features=AudioServiceOutOfProcess',
-            '--disable-print-preview',
-            '--disable-speech-api',
-            '--disable-canvas-aa',
+            '--disable-background-networking',
+            '--disable-remote-fonts',
+            '--disable-component-update',
+            '--disable-client-side-phishing-detection',
+            '--disable-oopr-debug-crash-dump',
             
-            # Window and display
-            '--window-position=0,0',
-            '--force-color-profile=srgb',
+            # Privacy
+            '--disable-features=Reporting',
+            '--disable-crash-reporter',
+            '--disable-breakpad',
+            '--disable-features=InterestCohortAPI',
+            '--disable-features=FlocIdComputedEventLogging',
+            '--disable-features=MediaRouter',
+            '--enable-features=NetworkService,NetworkServiceInProcess',
             
-            # Misc optimizations
+            # Misc
+            '--no-pings',
+            '--no-default-browser-check',
+            '--disable-default-apps',
+            '--disable-popup-blocking',
+            '--disable-translate',
+            '--metrics-recording-only',
+            '--safebrowsing-disable-auto-update',
             '--password-store=basic',
             '--use-mock-keychain',
-            '--export-tagged-pdf',
-            '--no-pings',
-            '--enable-automation=false',
-            '--disable-field-trial-config',
-            '--disable-background-mode',
-            '--disable-breakpad',
-            '--disable-component-update',
+            '--force-color-profile=srgb',
+            '--disable-features=RendererCodeIntegrity',
             '--disable-features=OptimizationHints',
-            '--disable-features=DialMediaRouteProvider',
-            '--disable-features=CalculateNativeWinOcclusion',
-            '--disable-features=InterestFeedContentSuggestions',
-            '--disable-features=CertificateTransparencyComponentUpdater'
+            
+            # User agent override
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
         ]
         
-    def _get_context_options(self) -> Dict[str, Any]:
-        """Get context options with authentic browser configuration"""
-        browser_config = self.config.get('browser', {})
-        user_agent = os.getenv('USER_AGENT', 
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36'
-        )
+        # Platform specific adjustments
+        if platform.system() == "Darwin":  # macOS
+            # macOS specific WebGL settings
+            args.extend([
+                '--use-gl=angle',
+                '--use-angle=gl'
+            ])
+        elif platform.system() == "Linux":
+            # Linux specific settings
+            args.extend([
+                '--use-gl=desktop',
+                '--enable-features=VaapiVideoDecoder'
+            ])
+        elif platform.system() == "Windows":
+            args.append('--disable-features=RendererCodeIntegrity')
+            
+        return args
+        
+    def _get_enhanced_context_options(self) -> Dict[str, Any]:
+        """Get context options that match real browser exactly"""
+        # Get real screen dimensions
+        try:
+            if platform.system() == "Windows":
+                import tkinter
+                root = tkinter.Tk()
+                screen_width = root.winfo_screenwidth()
+                screen_height = root.winfo_screenheight()
+                root.destroy()
+            else:
+                # Default for other systems
+                screen_width = 1920
+                screen_height = 1080
+        except:
+            screen_width = 1920
+            screen_height = 1080
+            
+        # Get system locale
+        import locale
+        system_locale = locale.getdefaultlocale()[0] or 'en-US'
+        system_locale = system_locale.replace('_', '-')
+        
+        # Browser viewport (slightly smaller than screen)
+        viewport_width = min(1440, screen_width - 100)
+        viewport_height = min(900, screen_height - 100)
         
         return {
-            'viewport': browser_config.get('viewport', {'width': 1440, 'height': 720}),
-            'screen': {'width': 1920, 'height': 1080},
-            'user_agent': user_agent,
-            'locale': os.getenv('BROWSER_LOCALE', 'it-IT'),
-            'timezone_id': 'Europe/Rome',
-            'permissions': ['geolocation', 'notifications'],
-            'geolocation': {'latitude': 41.9028, 'longitude': 12.4964},  # Rome
+            'viewport': {'width': viewport_width, 'height': viewport_height},
+            'screen': {'width': screen_width, 'height': screen_height},
+            'user_agent': self._get_real_user_agent(),
+            'locale': os.getenv('BROWSER_LOCALE', system_locale),
+            'timezone_id': self._get_system_timezone(),
+            'permissions': [],  # Don't pre-grant permissions
+            'geolocation': None,  # Don't set geolocation
             'color_scheme': 'light',
-            'device_scale_factor': 1,
+            'device_scale_factor': self._get_device_scale_factor(),
             'is_mobile': False,
             'has_touch': False,
             'java_script_enabled': True,
-            'bypass_csp': True,
             'accept_downloads': True,
             'ignore_https_errors': True,
+            'bypass_csp': True,
             'extra_http_headers': {
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Accept-Language': f'{system_locale},en-US;q=0.9,en;q=0.8',
                 'Accept-Encoding': 'gzip, deflate, br, zstd',
-                'DNT': '1',
-                'Connection': 'keep-alive',
                 'Upgrade-Insecure-Requests': '1',
                 'Sec-Fetch-Dest': 'document',
                 'Sec-Fetch-Mode': 'navigate',
                 'Sec-Fetch-Site': 'none',
-                'Sec-Fetch-User': '?1',
-                'Cache-Control': 'max-age=0',
-                'sec-ch-ua': '"Not)A;Brand";v="99", "Google Chrome";v="138", "Chromium";v="138"',
-                'sec-ch-ua-mobile': '?0',
-                'sec-ch-ua-platform': '"macOS"',
+                'Sec-Fetch-User': '?1'
             }
         }
         
-    def _get_chrome_path(self) -> Optional[str]:
-
-        chrome_paths = {
-            'linux': [
-                '/usr/bin/google-chrome',
-                '/usr/bin/google-chrome-stable',
-                '/usr/bin/chrome',
-                '/opt/google/chrome/google-chrome',
-                '/snap/bin/chromium'  # Snap package
-            ],
-            'darwin': [  # macOS
-                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-                '/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta',
-                '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary'
-            ],
-            'win32': [  # Windows
-                'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-                'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-                os.path.expandvars('%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe'),
-                os.path.expandvars('%PROGRAMFILES%\\Google\\Chrome\\Application\\chrome.exe'),
-                os.path.expandvars('%PROGRAMFILES(X86)%\\Google\\Chrome\\Application\\chrome.exe')
-            ]
-        }
+    def _get_real_user_agent(self) -> str:
+        """Get the actual Chrome user agent for current version"""
+        # Try to get Chrome version
+        chrome_version = self._get_chrome_version()
         
-        platform = sys.platform
-        paths = chrome_paths.get(platform, chrome_paths['linux'])
+        system = platform.system()
+        if system == "Windows":
+            os_string = "Windows NT 10.0; Win64; x64"
+        elif system == "Darwin":
+            os_string = "Macintosh; Intel Mac OS X 10_15_7"
+        else:
+            os_string = "X11; Linux x86_64"
+            
+        return f"Mozilla/5.0 ({os_string}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version} Safari/537.36"
         
-        for path in paths:
-            if os.path.exists(path):
-                logger.info(f"✅ Found Chrome at: {path}")
-                return path
+    def _get_chrome_version(self) -> str:
+        """Get actual Chrome version"""
+        try:
+            chrome_path = self._get_real_chrome_path()
+            if not chrome_path:
+                return "131.0.0.0"
                 
-        # Try to find Chrome using 'which' command on Unix-like systems
-        if platform != 'win32':
+            if platform.system() == "Windows":
+                try:
+                    # Try to get version from exe properties
+                    import win32api
+                    info = win32api.GetFileVersionInfo(chrome_path, '\\')
+                    ms = info['FileVersionMS']
+                    ls = info['FileVersionLS']
+                    version = f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
+                    return version
+                except:
+                    pass
+                    
+            # For macOS and Linux, use --version flag
             try:
-                result = subprocess.run(['which', 'google-chrome'], capture_output=True, text=True)
+                result = subprocess.run([chrome_path, '--version'], capture_output=True, text=True)
                 if result.returncode == 0:
-                    path = result.stdout.strip()
-                    if path and os.path.exists(path):
-                        logger.info(f"✅ Found Chrome via which: {path}")
-                        return path
+                    # Parse version from output like "Google Chrome 131.0.6778.85"
+                    version_str = result.stdout.strip()
+                    import re
+                    match = re.search(r'(\d+\.\d+\.\d+\.\d+)', version_str)
+                    if match:
+                        return match.group(1)
             except:
                 pass
                 
-        logger.warning("⚠️ Chrome not found, will use Chromium")
-        return None
-
-    # Update the initialize method to use Chrome detection:
-    async def initialize(self):
-        """Initialize Playwright and browser with enhanced stealth"""
-        if self._initialized:
-            logger.warning("⚠️ Browser manager already initialized")
-            return
-            
-        logger.info("🌐 Initializing browser with enhanced stealth...")
-        
-        try:
-            self.playwright = await async_playwright().start()
-            
-            browser_config = self.config.get('browser', {})
-            stealth_args = self._get_stealth_args()
-            context_options = self._get_context_options()
-            
-            # Detect Chrome path
-            chrome_path = self._get_chrome_path()
-            launch_options = {
-                'headless': browser_config.get('headless', False),
-                'slow_mo': browser_config.get('slow_mo', 0),
-                'args': stealth_args
-            }
-            
-            # Use Chrome if found, otherwise fallback to Chromium
-            if chrome_path:
-                launch_options['executable_path'] = chrome_path
-                logger.info(f"🌐 Using Google Chrome from: {chrome_path}")
-            else:
-                # Use channel to let Playwright find Chrome
-                launch_options['channel'] = 'chrome'
-                logger.info("🌐 Using Chrome via channel (Playwright will find it)")
-            
-            if self.incognito_mode:
-                logger.info("🥷 Launching in incognito mode...")
-                # Launch browser in incognito
-                self.browser = await self.playwright.chromium.launch(
-                    **launch_options,
-                    args=['--incognito'] + stealth_args
-                )
-                
-                # Create incognito context
-                self.main_context = await self.browser.new_context(**context_options)
-            else:
-                logger.info("💾 Launching with persistent storage...")
-                # Launch persistent context
-                self.main_context = await self.playwright.chromium.launch_persistent_context(
-                    user_data_dir=str(self.user_data_dir.absolute()),
-                    **launch_options,
-                    **context_options
-                )
-            
-            # Set up route interception for authentic behavior
-            await self.main_context.route('**/*', self._intercept_requests)
-            
-            # Inject comprehensive stealth scripts
-            await self._inject_stealth_scripts(self.main_context)
-            
-            # Verify stealth
-            await self._verify_stealth()
-            
-            # Handle login
-            logged_in = await self.login_handler.ensure_logged_in(self.main_context)
-            if not logged_in:
-                raise Exception("Login failed")
-            
-            # Clean up tabs and get game page
-            await self._cleanup_and_verify_game_page()
-            
-            # Verify storage persistence
-            if not self.incognito_mode:
-                await self._verify_storage_persistence()
-            
-            # Check for initial bot protection
-            await self._check_initial_protection()
-            
-            # Start monitoring tasks
-            asyncio.create_task(self.captcha_detector.start_monitoring())
-            self._monitor_task = asyncio.create_task(self._monitor_pages())
-            
-            self._initialized = True
-            logger.info("✅ Browser initialized successfully with enhanced stealth")
-            
         except Exception as e:
-            logger.error(f"❌ Failed to initialize browser: {e}", exc_info=True)
-            await self.cleanup()
-            raise
+            logger.debug(f"Could not get Chrome version: {e}")
             
-    async def _inject_stealth_scripts(self, context: BrowserContext):
-        """Inject comprehensive stealth scripts"""
+        return "131.0.0.0"  # Fallback
+        
+    def _get_system_timezone(self) -> str:
+        """Get system timezone"""
+        try:
+            if platform.system() == "Windows":
+                import winreg
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\TimeZoneInformation") as key:
+                    tz_name, _ = winreg.QueryValueEx(key, "TimeZoneKeyName")
+                    return tz_name
+            else:
+                # Unix systems
+                if os.path.exists('/etc/timezone'):
+                    with open('/etc/timezone', 'r') as f:
+                        return f.read().strip()
+                elif os.path.exists('/etc/localtime'):
+                    # Try to resolve symlink
+                    import subprocess
+                    result = subprocess.run(['readlink', '-f', '/etc/localtime'], capture_output=True, text=True)
+                    if result.returncode == 0:
+                        # Extract timezone from path like /usr/share/zoneinfo/Europe/Rome
+                        path = result.stdout.strip()
+                        if '/zoneinfo/' in path:
+                            return path.split('/zoneinfo/')[-1]
+        except:
+            pass
+            
+        return 'Europe/Rome'  # Fallback for Italian server
+        
+    def _get_device_scale_factor(self) -> float:
+        """Get actual device scale factor"""
+        try:
+            if platform.system() == "Windows":
+                import ctypes
+                # Get DPI awareness
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)
+                hdc = ctypes.windll.user32.GetDC(0)
+                dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
+                ctypes.windll.user32.ReleaseDC(0, hdc)
+                return dpi / 96.0
+        except:
+            pass
+            
+        return 1.0
+        
+    async def _inject_ultra_stealth_scripts(self, context: BrowserContext):
+        """Inject enhanced stealth scripts that perfectly mimic real Chrome"""
         stealth_script = """
-        // Comprehensive stealth mode
+        // Ultra stealth mode - Undetectable
         (function() {
             'use strict';
             
-            // Remove webdriver property completely
-            const newProto = navigator.__proto__;
-            delete newProto.webdriver;
-            navigator.__proto__ = newProto;
+            // First, delete all traces of automation
+            const deleteFromWindow = [
+                '_phantom', 'phantom', 'callPhantom', '_selenium', 'callSelenium', 
+                '__webdriver_evaluate', '__selenium_evaluate', '__webdriver_script_function',
+                '__webdriver_script_func', '__webdriver_script_fn', '__fxdriver_evaluate',
+                '__driver_unwrapped', '__webdriver_unwrapped', '__driver_evaluate',
+                '__selenium_unwrapped', '__fxdriver_unwrapped', '_Selenium_IDE_Recorder',
+                '__nightmareNavigate', '_eventRecorder', 'domAutomation', 'domAutomationController',
+                '__lastWatirAlert', '__lastWatirConfirm', '__lastWatirPrompt', 'CalypsoAccount',
+                'cdc_adoQpoasnfa76pfcZLmcfl_Array', 'cdc_adoQpoasnfa76pfcZLmcfl_Object',
+                'cdc_adoQpoasnfa76pfcZLmcfl_Promise', 'cdc_adoQpoasnfa76pfcZLmcfl_Proxy',
+                'cdc_adoQpoasnfa76pfcZLmcfl_Symbol', 'cdc_adoQpoasnfa76pfcZLmcfl_JSON',
+                'geb', 'awesomium', '$chrome_asyncScriptInfo', '$cdc_asdjflasutopfhvcZLmcfl_',
+                'webdriver', 'driver', 'selenium',
+                // Additional phantom-related properties
+                '__phantomas', '_phantom', 'phantom', 'callPhantom',
+                '_phantomChildren', '_phantomProps', 'phantomjs'
+            ];
             
-            // Override the webdriver property more thoroughly
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => false,
-                configurable: false,
-                enumerable: false
+            deleteFromWindow.forEach(prop => {
+                try { 
+                    delete window[prop];
+                    delete document[prop];
+                    delete navigator[prop];
+                } catch(e) {}
             });
             
-            // Remove automation indicators
-            ['cdc_adoQpoasnfa76pfcZLmcfl_Array',
-             'cdc_adoQpoasnfa76pfcZLmcfl_Promise', 
-             'cdc_adoQpoasnfa76pfcZLmcfl_Symbol',
-             'cdc_adoQpoasnfa76pfcZLmcfl_Object',
-             'cdc_adoQpoasnfa76pfcZLmcfl_JSON',
-             'cdc_adoQpoasnfa76pfcZLmcfl_Proxy',
-             '$cdc_asdjflasutopfhvcZLmcfl_',
-             '$chrome_asyncScriptInfo',
-             '__$webdriverAsyncExecutor',
-             '__driver_evaluate',
-             '__driver_unwrapped',
-             '__fxdriver_evaluate',
-             '__fxdriver_unwrapped',
-             '__lastWatirAlert',
-             '__lastWatirConfirm',
-             '__lastWatirPrompt',
-             '__selenium_evaluate',
-             '__selenium_unwrapped',
-             '__webdriver_evaluate',
-             '__webdriver_func',
-             '__webdriver_script_fn',
-             '__webdriver_script_func',
-             '__webdriver_script_function',
-             '__webdriver_unwrapped',
-             '_Selenium_IDE_Recorder',
-             'calledPhantom',
-             'domAutomation',
-             'domAutomationController'
-            ].forEach(prop => {
-                try { delete window[prop]; } catch(e) {}
+            // Prevent phantom properties from being defined
+            const blockProperties = ['phantom', '_phantom', 'callPhantom', '__phantomas', 'phantomjs'];
+            blockProperties.forEach(prop => {
+                try {
+                    Object.defineProperty(window, prop, {
+                        get: function() { return undefined; },
+                        set: function() {},
+                        enumerable: false,
+                        configurable: false
+                    });
+                } catch(e) {}
             });
             
-            // Chrome object enhancement
+            // Override webdriver property without recursion
+            try {
+                // Get the Navigator prototype
+                const NavigatorPrototype = Object.getPrototypeOf(navigator);
+                
+                // Delete existing webdriver property from all possible locations
+                delete NavigatorPrototype.webdriver;
+                delete navigator.webdriver;
+                delete window.navigator.webdriver;
+                
+                // Use Object.defineProperty on the prototype
+                Object.defineProperty(NavigatorPrototype, 'webdriver', {
+                    get: function() { return false; },
+                    set: function() {},
+                    enumerable: false,
+                    configurable: false
+                });
+            } catch (e) {
+                console.warn('Could not override webdriver property:', e);
+            }
+            
+            // Chrome object must exist and be complete
             if (!window.chrome) {
                 window.chrome = {};
             }
             
-            window.chrome = new Proxy(window.chrome, {
-                has: (target, key) => {
-                    return key in target;
+            // Define chrome properties without getters to avoid recursion
+            window.chrome.app = {
+                isInstalled: false,
+                InstallState: {
+                    DISABLED: 'disabled',
+                    INSTALLED: 'installed',
+                    NOT_INSTALLED: 'not_installed'
                 },
-                get: (target, key) => {
-                    if (key === 'runtime') {
-                        return {
-                            connect: () => {},
-                            sendMessage: () => {},
-                            onMessage: {
-                                addListener: () => {}
-                            },
-                            id: undefined,
-                            getManifest: () => undefined
-                        };
-                    }
-                    if (key === 'app') {
-                        return {
-                            isInstalled: false,
-                            getDetails: () => null,
-                            getIsInstalled: () => false,
-                            installState: () => 'not_installed',
-                            runningState: () => 'cannot_run'
-                        };
-                    }
-                    if (key === 'csi') {
-                        return () => ({
-                            onloadT: Date.now(),
-                            pageT: Date.now() - Math.random() * 1000,
-                            startE: Date.now() - Math.random() * 2000,
-                            tran: 15
-                        });
-                    }
-                    if (key === 'loadTimes') {
-                        return () => ({
-                            requestTime: Date.now() / 1000 - Math.random() * 100,
-                            startLoadTime: Date.now() / 1000 - Math.random() * 99,
-                            commitLoadTime: Date.now() / 1000 - Math.random() * 98,
-                            finishDocumentLoadTime: Date.now() / 1000 - Math.random() * 97,
-                            finishLoadTime: Date.now() / 1000 - Math.random() * 96,
-                            firstPaintTime: Date.now() / 1000 - Math.random() * 95,
-                            firstPaintAfterLoadTime: 0,
-                            navigationType: 'Other',
-                            wasFetchedViaSpdy: false,
-                            wasNpnNegotiated: true,
-                            npnNegotiatedProtocol: 'h2',
-                            wasAlternateProtocolAvailable: false,
-                            connectionInfo: 'h2'
-                        });
-                    }
-                    return target[key];
-                }
+                RunningState: {
+                    CANNOT_RUN: 'cannot_run',
+                    READY_TO_RUN: 'ready_to_run',
+                    RUNNING: 'running'
+                },
+                getDetails: () => null,
+                getIsInstalled: () => false,
+                installState: () => 'not_installed',
+                runningState: () => 'cannot_run'
+            };
+            
+            window.chrome.runtime = {
+                OnInstalledReason: {
+                    CHROME_UPDATE: 'chrome_update',
+                    INSTALL: 'install',
+                    SHARED_MODULE_UPDATE: 'shared_module_update',
+                    UPDATE: 'update'
+                },
+                OnRestartRequiredReason: {
+                    APP_UPDATE: 'app_update',
+                    OS_UPDATE: 'os_update',
+                    PERIODIC: 'periodic'
+                },
+                PlatformArch: {
+                    ARM: 'arm',
+                    MIPS: 'mips',
+                    MIPS64: 'mips64',
+                    X86_32: 'x86-32',
+                    X86_64: 'x86-64'
+                },
+                PlatformNaclArch: {
+                    ARM: 'arm',
+                    MIPS: 'mips',
+                    MIPS64: 'mips64',
+                    X86_32: 'x86-32',
+                    X86_64: 'x86-64'
+                },
+                PlatformOs: {
+                    ANDROID: 'android',
+                    CROS: 'cros',
+                    LINUX: 'linux',
+                    MAC: 'mac',
+                    OPENBSD: 'openbsd',
+                    WIN: 'win'
+                },
+                RequestUpdateCheckStatus: {
+                    NO_UPDATE: 'no_update',
+                    THROTTLED: 'throttled',
+                    UPDATE_AVAILABLE: 'update_available'
+                },
+                id: undefined,
+                connect: () => {},
+                sendMessage: () => {}
+            };
+            
+            window.chrome.csi = () => ({
+                onloadT: Date.now(),
+                pageT: Date.now() + Math.random() * 100,
+                startE: Date.now() - Math.random() * 1000,
+                tran: 15
             });
             
-            // Plugin spoofing
+            window.chrome.loadTimes = () => ({
+                commitLoadTime: Date.now() / 1000 - Math.random() * 10,
+                connectionInfo: 'h2',
+                finishDocumentLoadTime: Date.now() / 1000 - Math.random() * 10,
+                finishLoadTime: Date.now() / 1000 - Math.random() * 10,
+                firstPaintAfterLoadTime: 0,
+                firstPaintTime: Date.now() / 1000 - Math.random() * 10,
+                navigationType: 'Other',
+                npnNegotiatedProtocol: 'h2',
+                requestTime: Date.now() / 1000 - Math.random() * 10,
+                startLoadTime: Date.now() / 1000 - Math.random() * 10,
+                wasAlternateProtocolAvailable: false,
+                wasFetchedViaSpdy: true,
+                wasNpnNegotiated: true
+            });
+            
+            window.chrome.webstore = {
+                install: () => {},
+                onDownloadProgress: {},
+                onInstallStageChanged: {}
+            };
+            
+            // Permissions should work like real Chrome
+            if (navigator.permissions && navigator.permissions.query) {
+                const originalQuery = navigator.permissions.query;
+                navigator.permissions.query = function(parameters) {
+                    if (parameters.name === 'webdriver') {
+                        return Promise.reject(new Error('Unknown permission'));
+                    }
+                    return originalQuery.apply(this, arguments);
+                };
+            }
+            
+            // Plugin detection - define once without getters
+            const pluginData = [
+                {
+                    name: 'PDF Viewer',
+                    description: 'Portable Document Format',
+                    filename: 'internal-pdf-viewer',
+                    mimeTypes: [{
+                        type: 'application/pdf',
+                        suffixes: 'pdf',
+                        description: 'Portable Document Format'
+                    }]
+                },
+                {
+                    name: 'Chrome PDF Viewer',
+                    description: 'Portable Document Format',
+                    filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
+                    mimeTypes: [{
+                        type: 'application/x-google-chrome-pdf',
+                        suffixes: 'pdf',
+                        description: 'Portable Document Format'
+                    }]
+                },
+                {
+                    name: 'Chromium PDF Plugin',
+                    description: 'Portable Document Format',
+                    filename: 'internal-pdf-viewer',
+                    mimeTypes: [{
+                        type: 'application/x-nacl',
+                        suffixes: '',
+                        description: 'Native Client Executable'
+                    }]
+                },
+                {
+                    name: 'Microsoft Edge PDF Viewer',
+                    description: 'Portable Document Format',
+                    filename: 'internal-pdf-viewer',
+                    mimeTypes: [{
+                        type: 'application/pdf',
+                        suffixes: 'pdf',
+                        description: 'Portable Document Format'
+                    }]
+                },
+                {
+                    name: 'WebKit built-in PDF',
+                    description: 'Portable Document Format',
+                    filename: 'internal-pdf-viewer',
+                    mimeTypes: [{
+                        type: 'application/pdf',
+                        suffixes: 'pdf',
+                        description: 'Portable Document Format'
+                    }]
+                }
+            ];
+            
+            // Create plugins
+            const plugins = [];
+            pluginData.forEach((p, index) => {
+                const plugin = Object.create(Plugin.prototype);
+                plugin.name = p.name;
+                plugin.description = p.description;
+                plugin.filename = p.filename;
+                plugin.length = p.mimeTypes.length;
+                
+                p.mimeTypes.forEach((mt, mtIndex) => {
+                    const mimeType = Object.create(MimeType.prototype);
+                    mimeType.type = mt.type;
+                    mimeType.suffixes = mt.suffixes;
+                    mimeType.description = mt.description;
+                    mimeType.enabledPlugin = plugin;
+                    plugin[mtIndex] = mimeType;
+                });
+                
+                plugins.push(plugin);
+            });
+            
+            // Override navigator.plugins
             Object.defineProperty(navigator, 'plugins', {
-                get: () => {
-                    const plugins = [
-                        {
-                            description: "Portable Document Format",
-                            filename: "internal-pdf-viewer",
-                            length: 1,
-                            name: "Chrome PDF Plugin",
-                            0: {
-                                description: "Portable Document Format",
-                                enabledPlugin: Plugin,
-                                suffixes: "pdf",
-                                type: "application/x-google-chrome-pdf"
-                            }
-                        },
-                        {
-                            description: "Portable Document Format",
-                            filename: "internal-pdf-viewer",
-                            length: 1,
-                            name: "Chrome PDF Viewer",
-                            0: {
-                                description: "Portable Document Format",
-                                enabledPlugin: Plugin,
-                                suffixes: "pdf",
-                                type: "application/pdf"
-                            }
-                        },
-                        {
-                            description: "Native Client Executable",
-                            filename: "internal-nacl-plugin",
-                            length: 2,
-                            name: "Native Client",
-                            0: {
-                                description: "Native Client Executable",
-                                enabledPlugin: Plugin,
-                                suffixes: "",
-                                type: "application/x-nacl"
-                            },
-                            1: {
-                                description: "Portable Native Client Executable",
-                                enabledPlugin: Plugin,
-                                suffixes: "",
-                                type: "application/x-pnacl"
+                get: function() {
+                    const arr = Object.create(PluginArray.prototype);
+                    plugins.forEach((p, i) => {
+                        arr[i] = p;
+                        arr[p.name] = p;
+                    });
+                    arr.length = plugins.length;
+                    arr.item = function(i) { return this[i]; };
+                    arr.namedItem = function(name) { return this[name]; };
+                    arr.refresh = function() {};
+                    return arr;
+                },
+                enumerable: true,
+                configurable: false
+            });
+            
+            // Fix Notification permissions
+            if (window.Notification) {
+                const OriginalNotification = window.Notification;
+                const notificationPermission = 'default';
+                
+                // Override Notification
+                window.Notification = function(...args) {
+                    return new OriginalNotification(...args);
+                };
+                
+                // Copy static properties
+                window.Notification.permission = notificationPermission;
+                window.Notification.requestPermission = OriginalNotification.requestPermission;
+                
+                // Copy prototype
+                window.Notification.prototype = OriginalNotification.prototype;
+            }
+            
+            # WebGL - Force enable and patch all methods
+            try {
+                // First, ensure WebGL is available
+                if (!window.WebGLRenderingContext) {
+                    console.warn('WebGL not available in this browser');
+                }
+                
+                // Store original getContext before any modifications
+                const originalGetContext = HTMLCanvasElement.prototype.getContext;
+                const contexts = new WeakMap();
+                
+                // Override getContext completely
+                HTMLCanvasElement.prototype.getContext = function(contextType, contextAttributes) {
+                    console.log('getContext called with:', contextType);
+                    
+                    // For WebGL contexts, ensure they work
+                    if (contextType === 'webgl' || contextType === 'webgl2' || contextType === 'experimental-webgl') {
+                        // Try to get context with specific attributes
+                        const attrs = contextAttributes || {
+                            alpha: true,
+                            depth: true,
+                            stencil: false,
+                            antialias: true,
+                            premultipliedAlpha: true,
+                            preserveDrawingBuffer: false,
+                            powerPreference: 'default',
+                            failIfMajorPerformanceCaveat: false,
+                            desynchronized: false
+                        };
+                        
+                        // Try different context types
+                        let context = null;
+                        const contextTypes = ['webgl2', 'webgl', 'experimental-webgl'];
+                        
+                        for (const type of contextTypes) {
+                            try {
+                                context = originalGetContext.call(this, type, attrs);
+                                if (context) break;
+                            } catch (e) {
+                                console.warn(`Failed to create ${type} context:`, e);
                             }
                         }
-                    ];
+                        
+                        if (!context) {
+                            console.error('Failed to create any WebGL context');
+                            // Return a mock context as last resort
+                            context = {
+                                canvas: this,
+                                drawingBufferWidth: this.width,
+                                drawingBufferHeight: this.height,
+                                getParameter: function(param) {
+                                    if (param === 37445) return 'Intel Inc.';
+                                    if (param === 37446) return 'Intel Iris OpenGL Engine';
+                                    if (param === 7936) return 'WebKit';
+                                    if (param === 7937) return 'WebKit WebGL';
+                                    if (param === 7938) return '2.0';
+                                    if (param === 35724) return 'WebGL GLSL ES 1.0';
+                                    return 0;
+                                },
+                                getExtension: function(name) {
+                                    if (name === 'WEBGL_debug_renderer_info') {
+                                        return {
+                                            UNMASKED_VENDOR_WEBGL: 37445,
+                                            UNMASKED_RENDERER_WEBGL: 37446
+                                        };
+                                    }
+                                    return null;
+                                },
+                                getSupportedExtensions: function() {
+                                    return ['WEBGL_debug_renderer_info'];
+                                },
+                                getContextAttributes: function() {
+                                    return attrs;
+                                }
+                            };
+                        } else {
+                            // Wrap real context
+                            const originalGetParameter = context.getParameter.bind(context);
+                            const originalGetExtension = context.getExtension.bind(context);
+                            
+                            context.getParameter = function(param) {
+                                console.log('getParameter called with:', param);
+                                if (param === 37445) return 'Intel Inc.';
+                                if (param === 37446) return 'Intel Iris OpenGL Engine';
+                                try {
+                                    return originalGetParameter(param);
+                                } catch (e) {
+                                    return 0;
+                                }
+                            };
+                            
+                            context.getExtension = function(name) {
+                                console.log('getExtension called with:', name);
+                                if (name === 'WEBGL_debug_renderer_info') {
+                                    return {
+                                        UNMASKED_VENDOR_WEBGL: 37445,
+                                        UNMASKED_RENDERER_WEBGL: 37446
+                                    };
+                                }
+                                try {
+                                    return originalGetExtension(name);
+                                } catch (e) {
+                                    return null;
+                                }
+                            };
+                        }
+                        
+                        contexts.set(this, context);
+                        return context;
+                    }
                     
-                    plugins.forEach(plugin => {
-                        plugin.__proto__ = PluginArray.prototype;
-                    });
+                    // For other context types, use original
+                    return originalGetContext.call(this, contextType, contextAttributes);
+                };
+                
+                // Also patch the WebGL prototypes if they exist
+                if (window.WebGLRenderingContext) {
+                    const proto = WebGLRenderingContext.prototype;
+                    const originalGetParameter = proto.getParameter;
                     
-                    return plugins;
+                    proto.getParameter = function(param) {
+                        if (param === 37445) return 'Intel Inc.';
+                        if (param === 37446) return 'Intel Iris OpenGL Engine';
+                        return originalGetParameter.call(this, param);
+                    };
+                    
+                    // Ensure getExtension works
+                    const originalGetExtension = proto.getExtension;
+                    proto.getExtension = function(name) {
+                        if (name === 'WEBGL_debug_renderer_info') {
+                            return {
+                                UNMASKED_VENDOR_WEBGL: 37445,
+                                UNMASKED_RENDERER_WEBGL: 37446
+                            };
+                        }
+                        return originalGetExtension.call(this, name);
+                    };
                 }
-            });
+                
+                if (window.WebGL2RenderingContext) {
+                    const proto = WebGL2RenderingContext.prototype;
+                    const originalGetParameter = proto.getParameter;
+                    
+                    proto.getParameter = function(param) {
+                        if (param === 37445) return 'Intel Inc.';
+                        if (param === 37446) return 'Intel Iris OpenGL Engine';
+                        return originalGetParameter.call(this, param);
+                    };
+                }
+                
+                // Test WebGL immediately
+                try {
+                    const testCanvas = document.createElement('canvas');
+                    const testContext = testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl');
+                    if (testContext) {
+                        console.log('WebGL test successful');
+                    } else {
+                        console.warn('WebGL test failed - no context');
+                    }
+                } catch (e) {
+                    console.error('WebGL test error:', e);
+                }
+                
+            } catch(e) {
+                console.error('Critical error in WebGL override:', e);
+            }
             
-            // Languages enhancement
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['it-IT', 'it', 'en-US', 'en']
-            });
+            // Override toString to prevent detection
+            const nativeToStringFunction = Function.prototype.toString;
+            Function.prototype.toString = function() {
+                if (this === navigator.permissions.query) {
+                    return 'function query() { [native code] }';
+                }
+                if (this === WebGLRenderingContext.prototype.getParameter) {
+                    return 'function getParameter() { [native code] }';
+                }
+                if (window.WebGL2RenderingContext && this === WebGL2RenderingContext.prototype.getParameter) {
+                    return 'function getParameter() { [native code] }';
+                }
+                return nativeToStringFunction.call(this);
+            };
             
-            // Platform spoofing
-            Object.defineProperty(navigator, 'platform', {
-                get: () => 'MacIntel'
-            });
-            
-            // Hardware concurrency
+            // Simple property overrides without getters
             Object.defineProperty(navigator, 'hardwareConcurrency', {
-                get: () => 8
+                value: 8,
+                writable: false,
+                enumerable: true,
+                configurable: false
             });
             
-            // Device memory
             Object.defineProperty(navigator, 'deviceMemory', {
-                get: () => 8
+                value: 8,
+                writable: false,
+                enumerable: true,
+                configurable: false
             });
             
-            // WebGL vendor spoofing
-            const getParameter = WebGLRenderingContext.prototype.getParameter;
-            WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                if (parameter === 37445) {
-                    return 'Intel Inc.';
-                }
-                if (parameter === 37446) {
-                    return 'Intel Iris OpenGL Engine';
-                }
-                return getParameter.apply(this, arguments);
-            };
-            
-            const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
-            WebGL2RenderingContext.prototype.getParameter = function(parameter) {
-                if (parameter === 37445) {
-                    return 'Intel Inc.';
-                }
-                if (parameter === 37446) {
-                    return 'Intel Iris OpenGL Engine';
-                }
-                return getParameter2.apply(this, arguments);
-            };
-            
-            // Permissions spoofing
-            const originalQuery = window.navigator.permissions.query;
-            window.navigator.permissions.query = (parameters) => {
-                if (parameters.name === 'notifications') {
-                    return Promise.resolve({ state: 'granted' });
-                }
-                return originalQuery.apply(navigator.permissions, arguments);
-            };
-            
-            // Connection spoofing
-            Object.defineProperty(navigator, 'connection', {
-                get: () => ({
-                    effectiveType: '4g',
-                    rtt: 100,
-                    downlink: 10,
-                    saveData: false
-                })
+            // Fix language detection - ensure it works everywhere
+            const originalLanguageGetter = Object.getOwnPropertyDescriptor(Navigator.prototype, 'language');
+            Object.defineProperty(navigator, 'language', {
+                get: function() { return 'it-IT'; },
+                enumerable: true,
+                configurable: false
             });
             
-            // Battery spoofing
-            navigator.getBattery = () => {
-                return Promise.resolve({
-                    charging: true,
-                    chargingTime: 0,
-                    dischargingTime: Infinity,
-                    level: 1,
-                    addEventListener: () => {},
-                    removeEventListener: () => {}
+            Object.defineProperty(navigator, 'languages', {
+                get: function() { return ['it-IT', 'it', 'en-US', 'en']; },
+                enumerable: true,
+                configurable: false
+            });
+            
+            // Connection info
+            if (!navigator.connection) {
+                Object.defineProperty(navigator, 'connection', {
+                    value: {
+                        downlink: 10,
+                        effectiveType: '4g',
+                        rtt: 50,
+                        saveData: false,
+                        addEventListener: () => {},
+                        removeEventListener: () => {},
+                        dispatchEvent: () => true
+                    },
+                    writable: false,
+                    enumerable: true,
+                    configurable: false
                 });
-            };
+            }
             
-            // Media devices
+            // MediaDevices
             if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
                 navigator.mediaDevices.enumerateDevices = async () => {
                     return [
                         {
                             deviceId: "default",
                             kind: "audioinput",
-                            label: "Default - MacBook Pro Microphone (Built-in)",
-                            groupId: "default"
+                            label: "Default - Microphone (Realtek(R) Audio)",
+                            groupId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+                        },
+                        {
+                            deviceId: "communications",
+                            kind: "audioinput",
+                            label: "Communications - Microphone (Realtek(R) Audio)",
+                            groupId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+                        },
+                        {
+                            deviceId: "default",
+                            kind: "audiooutput",
+                            label: "Default - Speakers (Realtek(R) Audio)",
+                            groupId: "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
                         }
                     ];
                 };
             }
             
-            // Override toString methods to prevent detection
-            const originalToString = Function.prototype.toString;
-            Function.prototype.toString = function() {
-                if (this === window.navigator.webdriver) {
-                    return 'function webdriver() { [native code] }';
+            // Battery API
+            if (navigator.getBattery) {
+                navigator.getBattery = () => Promise.resolve({
+                    charging: true,
+                    chargingTime: 0,
+                    dischargingTime: Infinity,
+                    level: 1.0,
+                    addEventListener: () => {},
+                    removeEventListener: () => {},
+                    dispatchEvent: () => true
+                });
+            }
+            
+            // Remove Playwright specific properties
+            delete window.__playwright;
+            delete window.__pw_manual;
+            delete window.__PW_inspect;
+            delete window.playwright;
+            
+            // Additional anti-detection measures
+            // Prevent stack trace analysis
+            const originalError = Error;
+            window.Error = function(...args) {
+                const error = new originalError(...args);
+                // Clean stack traces that might reveal automation
+                if (error.stack) {
+                    error.stack = error.stack
+                        .split('\n')
+                        .filter(line => !line.includes('playwright') && !line.includes('puppeteer'))
+                        .join('\n');
                 }
-                return originalToString.apply(this, arguments);
+                return error;
+            };
+            window.Error.prototype = originalError.prototype;
+            
+            // Prevent timing attacks
+            const originalDateNow = Date.now;
+            let lastTime = originalDateNow();
+            Date.now = function() {
+                // Add small random variance to prevent timing fingerprinting
+                const now = originalDateNow();
+                if (now - lastTime < 5) {
+                    return lastTime;
+                }
+                lastTime = now + (Math.random() * 2 - 1);
+                return Math.floor(lastTime);
             };
             
-            // Monitor for localStorage changes (debugging)
-            if (typeof(Storage) !== "undefined") {
-                const originalSetItem = Storage.prototype.setItem;
-                Storage.prototype.setItem = function(key, value) {
-                    if (key.includes('farmGod') || key.includes('FarmGod') || 
-                        key.includes('troop') || key.includes('category') || 
-                        key.includes('sendOrder') || key.includes('runTimes') ||
-                        key.includes('keepHome') || key.includes('prioritise')) {
-                        console.log(`[LocalStorage SET] ${key} = ${value?.substring ? value.substring(0, 100) + '...' : value}`);
-                    }
-                    return originalSetItem.apply(this, arguments);
-                };
-            }
+            // Hide automation in error messages
+            const originalToString = Error.prototype.toString;
+            Error.prototype.toString = function() {
+                const result = originalToString.call(this);
+                if (result.includes('playwright') || result.includes('puppeteer')) {
+                    return 'Error';
+                }
+                return result;
+            };
+            
+            // Freeze important objects to prevent modification
+            try {
+                Object.freeze(Navigator.prototype);
+                Object.freeze(Window.prototype);
+                Object.freeze(Document.prototype);
+            } catch(e) {}
         })();
         """
         
-        # Add additional stealth from BrowserFingerprint if available
-        if hasattr(BrowserFingerprint, 'get_enhanced_stealth_script'):
-            stealth_script += BrowserFingerprint.get_enhanced_stealth_script()
-        
         await context.add_init_script(stealth_script)
+        logger.info("💉 Injected ultra-stealth scripts")
         
-    async def _intercept_requests(self, route: Route, request: Request):
-        """Intercept and modify requests for authentic behavior"""
-        headers = request.headers.copy()
+    async def initialize(self):
+        """Initialize browser with maximum stealth"""
+        if self._initialized:
+            logger.warning("⚠️ Browser manager already initialized")
+            return
+            
+        logger.info("🌐 Initializing stealth browser...")
         
-        # Update headers based on request type
-        resource_type = request.resource_type
+        try:
+            self.playwright = await async_playwright().start()
+            
+            # Get Chrome path
+            chrome_path = self._get_real_chrome_path()
+            if not chrome_path:
+                raise Exception("Chrome not found! Please install Google Chrome.")
+                
+            # Prepare launch options
+            browser_config = self.config.get('browser', {})
+            stealth_args = self._get_stealth_args()
+            context_options = self._get_enhanced_context_options()
+            
+            launch_options = {
+                'headless': False,  # Never run headless
+                'executable_path': chrome_path,
+                'args': stealth_args,
+                'ignore_default_args': [
+                    '--enable-automation',
+                    '--enable-blink-features=AutomationControlled'
+                ],
+                'handle_sigint': False,
+                'handle_sigterm': False,
+                'handle_sighup': False
+            }
+            
+            # Slow motion for more human-like behavior
+            if browser_config.get('slow_mo'):
+                launch_options['slow_mo'] = browser_config['slow_mo']
+                
+            # Launch browser
+            if self.incognito_mode:
+                logger.info("🥷 Launching Chrome in incognito mode...")
+                self.browser = await self.playwright.chromium.launch(**launch_options)
+                self.main_context = await self.browser.new_context(
+                    **context_options,
+                    no_viewport=False
+                )
+            else:
+                logger.info("💾 Launching Chrome with persistent profile...")
+                # Use launch_persistent_context for profile persistence
+                self.main_context = await self.playwright.chromium.launch_persistent_context(
+                    user_data_dir=str(self.user_data_dir.absolute()),
+                    **launch_options,
+                    **context_options,
+                    no_viewport=False
+                )
+                
+            # Inject stealth scripts
+            await self._inject_ultra_stealth_scripts(self.main_context)
+            
+            # Set up request interception
+            await self.main_context.route('**/*', self._handle_request)
+            
+            # Verify stealth
+            await self._verify_stealth_enhanced()
+            
+            # Handle login
+            logged_in = await self.login_handler.ensure_logged_in(self.main_context)
+            if not logged_in:
+                raise Exception("Login failed")
+                
+            # Clean up and setup
+            await self._cleanup_and_verify_game_page()
+            
+            # Verify storage
+            if not self.incognito_mode:
+                await self._verify_storage_persistence()
+                
+            # Check for initial protection
+            await self._check_initial_protection()
+            
+            # Start monitoring
+            asyncio.create_task(self.captcha_detector.start_monitoring())
+            self._monitor_task = asyncio.create_task(self._monitor_pages())
+            
+            self._initialized = True
+            logger.info("✅ Stealth browser initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize browser: {e}", exc_info=True)
+            await self.cleanup()
+            raise
+            
+    async def _handle_request(self, route: Route, request: Request):
+        """Handle requests to ensure authenticity"""
+        headers = dict(request.headers)
         
-        # Common headers
-        headers.update({
-            'sec-fetch-dest': self._get_fetch_dest(resource_type),
-            'sec-fetch-mode': 'navigate' if request.is_navigation_request() else 'cors',
-            'sec-fetch-site': self._get_fetch_site(request.url, headers.get('referer', '')),
-        })
+        # Remove automation headers
+        headers_to_remove = [
+            'x-devtools-emulate-network-conditions-client-id',
+            'x-devtools-request-id',
+            'x-automation-override'
+        ]
         
-        # Navigation-specific headers
+        for header in headers_to_remove:
+            headers.pop(header, None)
+            
+        # Ensure proper headers based on navigation
         if request.is_navigation_request():
+            headers['sec-fetch-dest'] = 'document'
+            headers['sec-fetch-mode'] = 'navigate'
             headers['sec-fetch-user'] = '?1'
             headers['upgrade-insecure-requests'] = '1'
             
-        # Add referer if missing
-        if 'referer' not in headers and not request.is_navigation_request():
-            headers['referer'] = request.url.split('?')[0]
-            
-        # Remove problematic headers
-        headers.pop('x-devtools-emulate-network-conditions-client-id', None)
-        headers.pop('x-devtools-request-id', None)
-        
+        # Continue with modified headers
         await route.continue_(headers=headers)
         
-    def _get_fetch_dest(self, resource_type: str) -> str:
-        """Get appropriate sec-fetch-dest header"""
-        mapping = {
-            'document': 'document',
-            'stylesheet': 'style',
-            'script': 'script',
-            'image': 'image',
-            'font': 'font',
-            'xhr': 'empty',
-            'fetch': 'empty',
-            'websocket': 'websocket',
-        }
-        return mapping.get(resource_type, 'empty')
-        
-    def _get_fetch_site(self, url: str, referer: str) -> str:
-        """Get appropriate sec-fetch-site header"""
-        if not referer:
-            return 'none'
-            
-        from urllib.parse import urlparse
-        url_domain = urlparse(url).netloc
-        referer_domain = urlparse(referer).netloc
-        
-        if url_domain == referer_domain:
-            return 'same-origin'
-        elif url_domain.endswith(referer_domain) or referer_domain.endswith(url_domain):
-            return 'same-site'
-        else:
-            return 'cross-site'
-            
-    async def _verify_stealth(self):
-        """Verify stealth measures are working"""
+    async def _verify_stealth_enhanced(self):
+        """Enhanced stealth verification"""
         page = None
         try:
-            # Create a test page
             page = await self.main_context.new_page()
             
-            # Check webdriver property
-            is_webdriver = await page.evaluate('navigator.webdriver')
-            logger.info(f"🔍 Webdriver detection: {is_webdriver}")
-            
-            # Check for automation properties
-            automation_props = await page.evaluate("""
-                () => {
-                    const props = [
-                        'navigator.webdriver',
-                        'window.cdc_adoQpoasnfa76pfcZLmcfl_Array',
-                        'window.cdc_adoQpoasnfa76pfcZLmcfl_Promise',
-                        'window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol',
-                        'window.chrome.runtime.id'
+            # Test comprehensive detection
+            detection_tests = await page.evaluate("""
+                async () => {
+                    const tests = {
+                        webdriver: navigator.webdriver,
+                        headless: navigator.headless || false,
+                        chrome: !!window.chrome,
+                        chrome_runtime: !!(window.chrome && window.chrome.runtime),
+                        permissions: typeof navigator.permissions !== 'undefined',
+                        plugins_length: navigator.plugins.length,
+                        languages: navigator.languages.length > 0,
+                        webgl_vendor: null,
+                        user_agent: navigator.userAgent,
+                        platform: navigator.platform,
+                        hardware_concurrency: navigator.hardwareConcurrency,
+                        device_memory: navigator.deviceMemory || 0,
+                        connection: !!(navigator.connection),
+                        bluetooth: !!(navigator.bluetooth),
+                        usb: !!(navigator.usb),
+                        media_devices: !!(navigator.mediaDevices),
+                        battery: typeof navigator.getBattery === 'function',
+                        automation_strings: 0,
+                        playwright_specific: false
+                    };
+                    
+                    // Check WebGL
+                    try {
+                        const canvas = document.createElement('canvas');
+                        const gl = canvas.getContext('webgl');
+                        if (gl) {
+                            const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                            if (debugInfo) {
+                                tests.webgl_vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                            }
+                        }
+                    } catch (e) {}
+                    
+                    // Check for automation strings
+                    const automationStrings = [
+                        'webdriver', '__webdriver', '_selenium', '__selenium',
+                        'callPhantom', '_phantom', '__nightmare', 'domAutomation',
+                        'domAutomationController', '__$webdriverAsyncExecutor'
                     ];
                     
-                    const detected = {};
-                    for (const prop of props) {
-                        try {
-                            detected[prop] = eval(prop) !== undefined;
-                        } catch(e) {
-                            detected[prop] = false;
+                    for (const prop of automationStrings) {
+                        if (prop in window || prop in document) {
+                            tests.automation_strings++;
                         }
                     }
-                    return detected;
+                    
+                    // Check for Playwright
+                    tests.playwright_specific = !!(
+                        window.__playwright || window.__pw_manual || 
+                        window.__PW_inspect || window.playwright
+                    );
+                    
+                    return tests;
                 }
             """)
             
-            logger.debug(f"🔍 Automation properties check: {automation_props}")
+            # Log results
+            logger.info("🔍 Stealth verification results:")
+            logger.info(f"  ✓ Webdriver: {detection_tests['webdriver']} (should be false)")
+            logger.info(f"  ✓ Chrome exists: {detection_tests['chrome']} (should be true)")
+            logger.info(f"  ✓ Plugins: {detection_tests['plugins_length']} (should be > 0)")
+            logger.info(f"  ✓ Languages: {detection_tests['languages']} (should be true)")
+            logger.info(f"  ✓ WebGL vendor: {detection_tests['webgl_vendor']}")
+            logger.info(f"  ✓ Platform: {detection_tests['platform']}")
+            logger.info(f"  ✓ Automation strings: {detection_tests['automation_strings']} (should be 0)")
+            logger.info(f"  ✓ Playwright detected: {detection_tests['playwright_specific']} (should be false)")
             
-            # Check plugins
-            plugins_count = await page.evaluate('navigator.plugins.length')
-            logger.debug(f"🔍 Plugins count: {plugins_count}")
-            
-            if is_webdriver:
+            # Warnings
+            if detection_tests['webdriver']:
                 logger.warning("⚠️ Webdriver property still detectable!")
-            else:
-                logger.info("✅ Stealth measures verified - webdriver not detected")
+            if detection_tests['automation_strings'] > 0:
+                logger.warning(f"⚠️ Found {detection_tests['automation_strings']} automation strings!")
+            if detection_tests['playwright_specific']:
+                logger.warning("⚠️ Playwright specific properties detected!")
                 
+            # Test with external detector
+            logger.info("🌐 Testing with external detector...")
+            await page.goto('https://bot.sannysoft.com', wait_until='networkidle')
+            await asyncio.sleep(2)
+            
+            # Take screenshot for verification
+            await page.screenshot(path='stealth_test.png')
+            logger.info("📸 Stealth test screenshot saved as stealth_test.png")
+            
         except Exception as e:
-            logger.error(f"Error verifying stealth: {e}")
+            logger.error(f"Stealth verification error: {e}")
         finally:
             if page and not page.is_closed():
                 await page.close()
                 
+    # Include all other methods from the original browser manager
+    # (_cleanup_and_verify_game_page, _verify_storage_persistence, etc.)
+    # Just copy them as-is since they don't need modification
+    
     async def _cleanup_and_verify_game_page(self):
         """Clean up extra tabs and ensure we have game page"""
         logger.debug(f"📑 Current pages: {len(self.main_context.pages)}")
@@ -712,7 +1290,6 @@ class BrowserManager:
         game_page = None
         pages_to_close = []
         
-        # Find game page and identify extras
         for page in self.main_context.pages:
             try:
                 if page.is_closed():
@@ -732,7 +1309,6 @@ class BrowserManager:
             except:
                 pass
                 
-        # Close extra pages
         for page in pages_to_close:
             try:
                 await page.close()
@@ -740,7 +1316,6 @@ class BrowserManager:
             except:
                 pass
                 
-        # Store game page reference
         if game_page:
             self.game_page = game_page
             self._known_pages.add(game_page)
@@ -1112,3 +1687,7 @@ class BrowserManager:
         except Exception as e:
             logger.error(f"❌ Failed to reinitialize browser: {e}", exc_info=True)
             raise
+
+
+# Create an alias for backward compatibility
+BrowserManager = StealthBrowserManager
