@@ -3,6 +3,7 @@ Auto Buyer - FAST VERSION - No human-like delays for maximum speed
 """
 import asyncio
 import random
+from datetime import datetime
 from typing import Optional, Dict, List
 
 from ..core.base_automation import BaseAutomation
@@ -11,7 +12,7 @@ from ..utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 
-class AutoBuyerFast(BaseAutomation):
+class AutoBuyer(BaseAutomation):
     """Automates premium resource purchasing at maximum speed"""
     
     @property
@@ -48,6 +49,10 @@ class AutoBuyerFast(BaseAutomation):
                 bought_something = await self.check_and_buy_resources_fast()
                 
                 if bought_something:
+                    # Increment run count for successful purchases
+                    self.run_count += 1
+                    self.last_run_time = datetime.now()
+                    logger.debug(f"✅ {self.name} completed run #{self.run_count}")
                     # Minimal wait after purchase
                     await asyncio.sleep(0.5)  # 500ms fixed delay
                 else:
@@ -223,8 +228,3 @@ class AutoBuyerFast(BaseAutomation):
         pass
 
 
-# If you want to use this instead of the regular AutoBuyer, 
-# rename the class to AutoBuyer:
-class AutoBuyer(AutoBuyerFast):
-    """Alias for the fast version"""
-    pass

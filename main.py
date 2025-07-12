@@ -6,6 +6,7 @@ import asyncio
 import signal
 import sys
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from src.utils.logger import setup_logger
 from src.utils.discord_webhook import DiscordNotifier
 from src.utils.screenshot_manager import screenshot_manager
 from src.vendor.download_scripts import download_external_scripts
+from src.dashboard.server import DashboardServer
 
 logger = setup_logger(__name__)
 
@@ -29,6 +31,7 @@ class TribalsBot:
         self.config = self.config_manager.config
         self.browser_manager = None
         self.scheduler = None
+        self.dashboard = None
         self.discord = DiscordNotifier(self.config.get('discord_webhook'))
         self.running = False
         self._shutdown_event = asyncio.Event()
@@ -60,6 +63,9 @@ class TribalsBot:
             
             # Initialize scheduler
             self.scheduler = Scheduler(self.config, self.browser_manager)
+            
+            # Initialize dashboard
+            self.dashboard = DashboardServer(self.scheduler, self.config_manager)
             
             # Clean up old screenshots (older than 7 days)
             screenshot_manager.cleanup_old_screenshots(7)
@@ -102,6 +108,12 @@ class TribalsBot:
         logger.info("🟢 Starting Tribals Bot")
         
         try:
+            # Start dashboard server
+            dashboard_config = self.config.get('dashboard', {})
+            dashboard_host = dashboard_config.get('host', '127.0.0.1')
+            dashboard_port = dashboard_config.get('port', 8080)
+            await self.dashboard.start(dashboard_host, dashboard_port)
+            
             # Start scheduler
             await self.scheduler.start()
             
@@ -132,6 +144,9 @@ class TribalsBot:
         self.running = False
         
         try:
+            if self.dashboard:
+                await self.dashboard.stop()
+                
             if self.scheduler:
                 await self.scheduler.stop()
                 
@@ -157,10 +172,19 @@ class TribalsBot:
             
         logger.info("👋 Tribals Bot stopped")
         
+    async def _force_shutdown(self):
+        """Force shutdown after timeout"""
+        await asyncio.sleep(5)  # Give 5 seconds for graceful shutdown
+        if self.running:
+            logger.warning("⚠️ Forcing shutdown...")
+            os._exit(0)
+        
     def handle_signal(self, signum, frame):
         """Handle system signals"""
         logger.info(f"📡 Received signal {signum}")
         self._shutdown_event.set()
+        # Force exit if needed
+        asyncio.create_task(self._force_shutdown())
         
 
 async def main():
@@ -173,8 +197,19 @@ async def main():
     bot = TribalsBot()
     
     # Setup signal handlers
-    signal.signal(signal.SIGINT, bot.handle_signal)
-    signal.signal(signal.SIGTERM, bot.handle_signal)
+    def signal_handler(signum, frame):
+        print("\n🛑 Shutdown signal received, stopping bot...")
+        bot._shutdown_event.set()
+        # Force exit after timeout
+        import threading
+        def force_exit():
+            time.sleep(3)
+            print("⚠️ Force stopping...")
+            os._exit(0)
+        threading.Thread(target=force_exit, daemon=True).start()
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
     # Handle Windows signals
     if sys.platform == 'win32':

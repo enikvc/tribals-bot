@@ -36,6 +36,12 @@ active_hours:
 debug_mode: false
 discord_webhook: ""
 
+# Dashboard Configuration
+dashboard:
+  enabled: true
+  host: "127.0.0.1"  # Use 0.0.0.0 to allow external access
+  port: 8080
+  
 # Server Configuration
 server:
   base_url: "https://it94.tribals.it"

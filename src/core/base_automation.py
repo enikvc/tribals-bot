@@ -28,6 +28,13 @@ class BaseAutomation(ABC):
         self.page: Optional[Page] = None
         self.attempts = 0
         
+        # Monitoring metrics
+        self.run_count = 0
+        self.error_count = 0
+        self.last_run_time = None
+        self.next_run_time = None
+        self.start_time = None
+        
         # Use shared anti-detection manager from browser_manager
         # This ensures all scripts share the same suspension state
         if hasattr(browser_manager, 'captcha_detector') and browser_manager.captcha_detector:
@@ -70,6 +77,7 @@ class BaseAutomation(ABC):
         logger.info(f"🟢 Starting {self.name}")
         self.running = True
         self.attempts = 0
+        self.start_time = datetime.now()
         
         try:
             # Get page
@@ -98,7 +106,11 @@ class BaseAutomation(ABC):
                             await self.human.random_mouse_movement(self.page, 2.0)
                         
                     await self.run_automation()
+                    self.run_count += 1
+                    self.last_run_time = datetime.now()
+                    logger.debug(f"✅ {self.name} completed run #{self.run_count}")
                 except Exception as e:
+                    self.error_count += 1
                     logger.error(f"❌ Error in {self.name}: {e}", exc_info=True)
                     # Capture error screenshot
                     await self.capture_error_screenshot(str(e))

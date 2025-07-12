@@ -4,6 +4,7 @@ Auto Scavenger - Fixed to handle massScavenge popup dialog
 import asyncio
 import random
 import os
+from datetime import datetime
 from typing import Optional
 
 from ..core.base_automation import BaseAutomation
@@ -41,6 +42,10 @@ class AutoScavenger(BaseAutomation):
                 
                 if success:
                     consecutive_failures = 0
+                    # Increment run count for successful scavenges
+                    self.run_count += 1
+                    self.last_run_time = datetime.now()
+                    logger.debug(f"✅ {self.name} completed run #{self.run_count}")
                 else:
                     consecutive_failures += 1
                     if consecutive_failures >= max_consecutive_failures:

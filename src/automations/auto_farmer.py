@@ -3,6 +3,7 @@ Auto Farmer - Fixed to handle FarmGod popup dialog
 """
 import asyncio
 import os
+from datetime import datetime
 from typing import List, Optional
 
 from ..core.base_automation import BaseAutomation
@@ -39,6 +40,11 @@ class AutoFarmer(BaseAutomation):
                     logger.warning("⚠️ Farming cycle failed, waiting 60s before retry")
                     await asyncio.sleep(60)
                     continue
+                
+                # Increment run count for successful farming cycles
+                self.run_count += 1
+                self.last_run_time = datetime.now()
+                logger.debug(f"✅ {self.name} completed run #{self.run_count}")
                 
                 # Wait for next cycle
                 interval = self.script_config['interval_seconds']
