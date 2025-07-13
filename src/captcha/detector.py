@@ -314,8 +314,15 @@ class CaptchaDetector:
                         current_url = page.url
                         logger.debug(f"🔄 Reloading page: {current_url[:50]}...")
                         
-                        # Simply reload the page
+                        # Reload the page
                         await page.reload(wait_until='domcontentloaded', timeout=10000)
+                        
+                        # Re-apply stealth modifications after reload
+                        try:
+                            await self._reapply_stealth_to_page(page)
+                            logger.debug(f"✅ Re-applied stealth modifications after reload")
+                        except Exception as stealth_error:
+                            logger.warning(f"⚠️ Could not re-apply stealth modifications: {stealth_error}")
                         
                         # Small delay between reloads
                         await asyncio.sleep(0.5)
@@ -332,3 +339,7 @@ class CaptchaDetector:
         except Exception as e:
             logger.error(f"Error reloading Tribals pages: {e}")
             # Non-critical error, continue anyway
+    
+    async def _reapply_stealth_to_page(self, page: Page):
+        """Re-apply the exact same full stealth script to a specific page after reload"""
+        await self.browser_manager.reapply_stealth_to_page(page)

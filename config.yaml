@@ -117,7 +117,7 @@ scripts:
     icon_click_interval: 300
     
   auto_scavenger:
-    enabled: true
+    enabled: false
     base_interval_seconds: 900
     interval_jitter_seconds: 90
     click_min_delay: 200

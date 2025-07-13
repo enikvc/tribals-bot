@@ -1064,6 +1064,51 @@ class StealthBrowserManager:
         await context.add_init_script(stealth_script)
         logger.info("💉 Injected ultra-stealth scripts")
         
+        # Store the stealth script for later re-application
+        self._stealth_script = stealth_script
+    
+    async def reapply_stealth_to_page(self, page: Page):
+        """Re-apply the same full stealth script to a specific page after reload"""
+        try:
+            if hasattr(self, '_stealth_script'):
+                # Use add_init_script approach for consistency, but inject into existing page
+                # by executing the script as a function
+                await page.add_script_tag(content=self._stealth_script)
+                logger.debug("✅ Re-applied full stealth script successfully")
+            else:
+                logger.warning("⚠️ Stealth script not available for re-application")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not re-apply stealth modifications via script tag: {e}")
+            # Fallback: try a simpler approach
+            try:
+                # Extract just the essential parts for evaluation
+                essential_script = """
+                (function() {
+                    try {
+                        // Override webdriver
+                        Object.defineProperty(Object.getPrototypeOf(navigator), 'webdriver', {
+                            get: () => false, enumerable: false, configurable: false
+                        });
+                        
+                        // Remove automation traces
+                        ['webdriver', 'driver', 'selenium', '__playwright', '__pw_manual'].forEach(prop => {
+                            try { delete window[prop]; delete navigator[prop]; } catch(e) {}
+                        });
+                        
+                        // Ensure chrome exists
+                        if (!window.chrome) window.chrome = { app: { isInstalled: false }, runtime: {} };
+                        
+                        console.log('Essential stealth reapplied');
+                    } catch(e) { console.warn('Stealth reapplication error:', e); }
+                })();
+                """
+                await page.evaluate(essential_script)
+                logger.debug("✅ Applied essential stealth via fallback")
+            except Exception as fallback_error:
+                logger.debug(f"Fallback also failed: {fallback_error}")
+                # Continue anyway - page might still work
+        
     async def initialize(self):
         """Initialize browser with maximum stealth"""
         if self._initialized:
