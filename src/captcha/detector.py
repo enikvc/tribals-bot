@@ -2,6 +2,7 @@
 Captcha Detector - Fixed to monitor ALL Tribals pages including manual tabs
 """
 import asyncio
+import time
 from typing import Set, Optional
 from playwright.async_api import Page
 
@@ -20,6 +21,7 @@ class CaptchaDetector:
         self.detected_captcha = False
         self.monitored_pages: Set[Page] = set()
         self.anti_detection_manager = AntiDetectionManager()
+        self.last_bot_protection_time = 0  # Cooldown to prevent rapid re-triggering
         
     async def start_monitoring(self):
         """Start monitoring for captchas and bot protection"""
@@ -67,12 +69,31 @@ class CaptchaDetector:
                             await self.handle_bot_protection(source_name, page)
                             break  # Handle one at a time
                             
-                        # Check for bot protection quest specifically
-                        quest_element = await page.query_selector('#botprotection_quest')
+                        # Check for bot protection quest specifically (only if clickable/active)
+                        quest_element = await page.query_selector('#botprotection_quest:not(.completed)')
                         if quest_element:
-                            logger.warning(f"🚨 Bot protection quest detected on {source_name}")
-                            await self.handle_bot_protection(source_name, page)
-                            break  # Handle one at a time
+                            # Double-check if it's actually clickable
+                            is_clickable = await page.evaluate("""
+                                () => {
+                                    const quest = document.querySelector('#botprotection_quest');
+                                    if (!quest) return false;
+                                    // Check if it's completed or disabled
+                                    return !quest.classList.contains('completed') && 
+                                           !quest.classList.contains('disabled') &&
+                                           quest.style.display !== 'none';
+                                }
+                            """)
+                            if is_clickable:
+                                # Check cooldown (30 seconds minimum between detections)
+                                current_time = time.time()
+                                if current_time - self.last_bot_protection_time < 30:
+                                    logger.debug(f"Bot protection cooldown active, skipping detection")
+                                    continue
+                                    
+                                self.last_bot_protection_time = current_time
+                                logger.warning(f"🚨 Bot protection quest detected on {source_name}")
+                                await self.handle_bot_protection(source_name, page)
+                                break  # Handle one at a time
                             
                         # Check for other types of captcha (not bot protection)
                         if await self.check_page_for_captcha(page):

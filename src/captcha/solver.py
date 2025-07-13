@@ -85,20 +85,57 @@ class CaptchaSolver:
         await screenshot_manager.capture_bot_protection(page, "initial_state")
         
         try:
-            # Make sure page is ready
-            await page.wait_for_load_state('networkidle', timeout=5000)
+            # Don't wait for network idle - it may never complete
+            # Just wait a bit for page to be ready
+            await asyncio.sleep(1)
             
             # Check if this is the quest div (clicking it starts captcha directly)
-            quest_element = await page.query_selector('#botprotection_quest')
+            # Try multiple selectors for the quest element
+            quest_selectors = [
+                '#botprotection_quest',
+                'div#botprotection_quest',
+                '[id="botprotection_quest"]',
+                '.quest_new[onclick*="BotProtection"]',
+                '.quest-item[onclick*="BotProtection"]'
+            ]
+            
+            quest_element = None
+            for selector in quest_selectors:
+                quest_element = await page.query_selector(selector)
+                if quest_element:
+                    logger.info(f"Found quest element with selector: {selector}")
+                    break
+                    
             if quest_element:
                 logger.info("📋 Found bot protection quest - clicking to start captcha")
                 
                 # Capture before clicking quest
                 await screenshot_manager.capture_bot_protection(page, "before_quest_click")
                 
-                # Click the quest div to start captcha directly
-                await quest_element.click()
-                logger.info("✅ Clicked bot protection quest - captcha should appear")
+                # Try to click the quest div to start captcha directly
+                try:
+                    # Check if element is visible and clickable
+                    is_visible = await quest_element.is_visible()
+                    is_enabled = await quest_element.is_enabled()
+                    logger.info(f"Quest element state - Visible: {is_visible}, Enabled: {is_enabled}")
+                    
+                    if is_visible and is_enabled:
+                        # Use JavaScript click as backup if normal click fails
+                        await page.evaluate("document.querySelector('#botprotection_quest').click()")
+                        logger.info("✅ Clicked bot protection quest via JavaScript - captcha should appear")
+                    else:
+                        logger.warning("⚠️ Quest element not clickable, falling back to manual mode")
+                        return await self._manual_solve_fallback(page)
+                        
+                except Exception as click_error:
+                    logger.error(f"❌ Failed to click quest: {click_error}")
+                    # Try JavaScript click as fallback
+                    try:
+                        await page.evaluate("document.querySelector('#botprotection_quest').click()")
+                        logger.info("✅ Clicked quest via JavaScript fallback")
+                    except:
+                        logger.error("❌ JavaScript click also failed")
+                        return await self._manual_solve_fallback(page)
                 
                 # Wait for captcha to appear
                 await asyncio.sleep(3)
@@ -600,6 +637,39 @@ class CaptchaSolver:
         
     async def _solve_manually(self, page: Page) -> bool:
         """Fallback - notify user to solve manually"""
+        # First check if bot protection is still actually present
+        logger.info("🔍 Checking if bot protection is still present before manual mode...")
+        
+        # Check for bot protection elements
+        bot_protection_present = False
+        
+        # Check for quest element
+        quest_element = await page.query_selector('#botprotection_quest')
+        if quest_element:
+            is_visible = await quest_element.is_visible()
+            if is_visible:
+                bot_protection_present = True
+                logger.info("✓ Bot protection quest still visible")
+                
+        # Check for bot protection page
+        bot_protection_row = await page.query_selector('td.bot-protection-row')
+        if bot_protection_row:
+            bot_protection_present = True
+            logger.info("✓ Bot protection page still present")
+            
+        # Check for hCaptcha
+        hcaptcha_frame = await page.query_selector('iframe[src*="hcaptcha.com"]')
+        if hcaptcha_frame:
+            bot_protection_present = True
+            logger.info("✓ hCaptcha still present")
+            
+        # If no bot protection found, it might have been solved already
+        if not bot_protection_present:
+            logger.info("✅ No bot protection detected - it may have been solved already!")
+            await asyncio.sleep(2)  # Small delay to ensure page is stable
+            return True
+            
+        # Bot protection is still present, proceed with manual mode
         logger.warning("=" * 60)
         logger.warning("⚠️  MANUAL CAPTCHA SOLVE REQUIRED")
         logger.warning("=" * 60)
