@@ -8,6 +8,7 @@ import platform
 import subprocess
 import json
 import shutil
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Set
 from datetime import datetime
@@ -51,6 +52,7 @@ class StealthBrowserManager:
         self.chrome_profile_path = self._get_chrome_profile_path()
         self.user_data_dir = Path(config.get('browser', {}).get('user_data_dir', './browser_data'))
         self.incognito_mode = os.getenv('INCOGNITO_MODE', 'false').lower() == 'true'
+        self.test_hcaptcha = os.getenv('TEST_HCAPTCHA', 'false').lower() == 'true'
         
         # Prepare profile
         self._prepare_browser_profile()
@@ -1066,6 +1068,27 @@ class StealthBrowserManager:
         
         # Store the stealth script for later re-application
         self._stealth_script = stealth_script
+        
+        # Inject sniper interface script
+        await self._inject_sniper_interface(context)
+    
+    async def _inject_sniper_interface(self, context: BrowserContext):
+        """Inject the sniper interface script into browser context"""
+        try:
+            # Read the sniper interface script
+            script_path = Path(__file__).parent.parent / "browser_extensions" / "sniper_interface.js"
+            
+            if script_path.exists():
+                with open(script_path, 'r', encoding='utf-8') as f:
+                    sniper_script = f.read()
+                
+                await context.add_init_script(sniper_script)
+                logger.info("🎯 Injected sniper interface script")
+            else:
+                logger.warning(f"⚠️ Sniper interface script not found at {script_path}")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to inject sniper interface: {e}")
     
     async def reapply_stealth_to_page(self, page: Page):
         """Re-apply the same full stealth script to a specific page after reload"""
@@ -1108,6 +1131,27 @@ class StealthBrowserManager:
             except Exception as fallback_error:
                 logger.debug(f"Fallback also failed: {fallback_error}")
                 # Continue anyway - page might still work
+        
+        # Also reapply sniper interface if on attack confirmation page
+        try:
+            if 'screen=place&try=confirm' in page.url:
+                await self._reapply_sniper_interface(page)
+        except Exception as e:
+            logger.debug(f"Could not reapply sniper interface: {e}")
+    
+    async def _reapply_sniper_interface(self, page: Page):
+        """Re-apply sniper interface to a specific page"""
+        try:
+            script_path = Path(__file__).parent.parent / "browser_extensions" / "sniper_interface.js"
+            
+            if script_path.exists():
+                with open(script_path, 'r', encoding='utf-8') as f:
+                    sniper_script = f.read()
+                
+                await page.add_script_tag(content=sniper_script)
+                logger.debug("🎯 Re-applied sniper interface script")
+        except Exception as e:
+            logger.debug(f"Failed to reapply sniper interface: {e}")
         
     async def initialize(self):
         """Initialize browser with maximum stealth"""
@@ -1174,6 +1218,9 @@ class StealthBrowserManager:
             # Verify stealth
             await self._verify_stealth_enhanced()
             
+            # Note: Automatic hCaptcha test removed to avoid interfering with game operations
+            # Use dashboard test button for manual testing
+            
             # Handle login
             logged_in = await self.login_handler.ensure_logged_in(self.main_context)
             if not logged_in:
@@ -1200,6 +1247,141 @@ class StealthBrowserManager:
             logger.error(f"❌ Failed to initialize browser: {e}", exc_info=True)
             await self.cleanup()
             raise
+            
+    async def _test_hcaptcha(self):
+        """Quick test to verify captcha solver and detector are working"""
+        logger.info("🧪 Quick hCaptcha test - checking solver and detector...")
+        
+        try:
+            # Test 1: Check if captcha solver is properly configured
+            from ..captcha.solver import CaptchaSolver
+            test_solver = CaptchaSolver(self.config, self.anti_detection_manager)
+            logger.info("✅ Captcha solver initialized successfully")
+            
+            # Test 2: Check if hcaptcha-challenger is available
+            try:
+                import hcaptcha_challenger
+                logger.info("✅ hcaptcha-challenger library available")
+            except ImportError:
+                logger.error("❌ hcaptcha-challenger library not available")
+                return
+            
+            # Test 3: Check if Gemini API key is configured
+            gemini_key = os.getenv('GEMINI_API_KEY')
+            if gemini_key and len(gemini_key) > 10:
+                logger.info("✅ Gemini API key configured")
+            else:
+                logger.warning("⚠️ Gemini API key not configured - manual solving only")
+            
+            # Test 4: Check captcha detector availability (it starts later in the process)
+            if hasattr(self, 'captcha_detector') and self.captcha_detector:
+                logger.info("✅ Captcha detector initialized (will start monitoring after browser setup)")
+            else:
+                logger.warning("⚠️ Captcha detector not available")
+            
+            # Test 5: Quick browser capabilities test
+            test_page = await self.main_context.new_page()
+            await test_page.goto('data:text/html,<html><body><h1>Test Page</h1><iframe src="about:blank"></iframe></body></html>')
+            
+            # Check if we can detect iframes
+            iframe_count = await test_page.evaluate("document.querySelectorAll('iframe').length")
+            if iframe_count > 0:
+                logger.info("✅ Browser can detect iframes")
+            else:
+                logger.warning("⚠️ Browser iframe detection issue")
+            
+            await test_page.close()
+            
+            # Test 6: Anti-detection manager
+            if hasattr(self, 'anti_detection_manager'):
+                logger.info("✅ Anti-detection manager available")
+                # Test suspend/resume
+                original_state = self.anti_detection_manager.suspended
+                self.anti_detection_manager.suspend("test")
+                if self.anti_detection_manager.suspended:
+                    logger.info("✅ Anti-detection suspend works")
+                    self.anti_detection_manager.resume()
+                    if not self.anti_detection_manager.suspended:
+                        logger.info("✅ Anti-detection resume works")
+                    else:
+                        logger.warning("⚠️ Anti-detection resume failed")
+                else:
+                    logger.warning("⚠️ Anti-detection suspend failed")
+                # Restore original state
+                if original_state and not self.anti_detection_manager.suspended:
+                    self.anti_detection_manager.suspend("restore")
+            
+            logger.info("🧪 ✅ hCaptcha test completed - All components ready!")
+            logger.info("💡 To test actual solving, visit https://accounts.hcaptcha.com/demo manually")
+            logger.info("💡 Or use the dashboard button to run a live test")
+            
+        except Exception as e:
+            logger.error(f"❌ hCaptcha test failed: {e}", exc_info=True)
+    
+    async def test_hcaptcha_live(self):
+        """Simple hCaptcha demo test - opens demo site for manual testing"""
+        logger.info("🧪 Opening hCaptcha demo site for testing...")
+        
+        try:
+            # Create a new page for testing
+            test_page = await self.main_context.new_page()
+            
+            # Navigate to hCaptcha demo
+            await test_page.goto('https://accounts.hcaptcha.com/demo', wait_until='domcontentloaded')
+            
+            # Take a screenshot
+            await screenshot_manager.capture_debug(test_page, "hcaptcha_demo_opened")
+            
+            logger.info("✅ hCaptcha demo page opened")
+            logger.info("💡 You can manually test captcha solving by clicking the checkbox")
+            logger.info("💡 Close the tab when done testing")
+            
+            return test_page
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to open hCaptcha demo: {e}", exc_info=True)
+            return None
+    
+    async def _open_dashboard_page(self):
+        """Open the dashboard page in a new tab (with retry logic)"""
+        try:
+            # Get dashboard configuration
+            dashboard_config = self.config.get('dashboard', {})
+            dashboard_host = dashboard_config.get('host', '127.0.0.1')
+            dashboard_port = dashboard_config.get('port', 8080)
+            dashboard_url = f"http://{dashboard_host}:{dashboard_port}"
+            
+            # Wait a moment for dashboard server to be ready
+            await asyncio.sleep(2)
+            
+            # Retry a few times in case dashboard server is still starting
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    # Create a new page for the dashboard
+                    dashboard_page = await self.main_context.new_page()
+                    
+                    # Navigate to dashboard
+                    logger.info(f"🌐 Opening dashboard at {dashboard_url} (attempt {attempt + 1})")
+                    await dashboard_page.goto(dashboard_url, wait_until='domcontentloaded', timeout=5000)
+                    
+                    # Take a screenshot
+                    await screenshot_manager.capture_debug(dashboard_page, "dashboard_opened")
+                    
+                    logger.info("✅ Dashboard page opened successfully")
+                    return  # Success!
+                    
+                except Exception as retry_error:
+                    logger.debug(f"Dashboard open attempt {attempt + 1} failed: {retry_error}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2)  # Wait before retry
+                    else:
+                        raise retry_error  # Last attempt failed
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not open dashboard page after {max_retries} attempts: {e}")
+            logger.info(f"💡 You can manually open the dashboard at http://127.0.0.1:8080")
+            # Don't fail browser initialization if dashboard opening fails
             
     async def _handle_request(self, route: Route, request: Request):
         """Handle requests to ensure authenticity"""

@@ -126,6 +126,11 @@
             font-size: 0.8rem;
         }
         
+        .btn-test {
+            background: #9b59b6;
+            color: white;
+        }
+        
         .automation-item {
             background: #f8f9fa;
             border: 1px solid #e9ecef;
@@ -276,6 +281,78 @@
             color: #721c24;
         }
         
+        /* Custom Confirmation Dialog */
+        .custom-confirm-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        }
+        
+        .custom-confirm-dialog {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            text-align: center;
+        }
+        
+        .custom-confirm-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            color: #e74c3c;
+        }
+        
+        .custom-confirm-message {
+            font-size: 1rem;
+            margin-bottom: 2rem;
+            line-height: 1.5;
+            color: #333;
+        }
+        
+        .custom-confirm-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+        
+        .custom-confirm-btn {
+            padding: 0.75rem 2rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .custom-confirm-ok {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .custom-confirm-ok:hover {
+            background: #c0392b;
+        }
+        
+        .custom-confirm-cancel {
+            background: #95a5a6;
+            color: white;
+        }
+        
+        .custom-confirm-cancel:hover {
+            background: #7f8c8d;
+        }
+        
         @media (max-width: 768px) {
             .container {
                 grid-template-columns: 1fr;
@@ -284,6 +361,14 @@
             
             .controls {
                 justify-content: center;
+            }
+            
+            .custom-confirm-dialog {
+                padding: 1.5rem;
+            }
+            
+            .custom-confirm-buttons {
+                flex-direction: column;
             }
         }
     </style>
@@ -313,6 +398,9 @@
                 </button>
                 <button class="btn btn-resume" @click="resumeAll" :disabled="!botStatus.scheduler?.paused">
                     ▶️ Resume All
+                </button>
+                <button class="btn btn-test" @click="testCaptcha">
+                    🧪 Test hCaptcha
                 </button>
                 <button class="btn btn-stop" @click="shutdownBot" style="margin-left: auto;">
                     🛑 Shutdown Bot
@@ -376,6 +464,76 @@
                         </button>
                     </div>
                 </div>
+            </div>
+            
+            <!-- Sniper Service -->
+            <div class="card">
+                <h2>🎯 Sniper Service</h2>
+                <div v-if="sniperStatus" class="metrics">
+                    <div class="metric">
+                        <div class="metric-value" :style="{ color: sniperStatus.process_running ? '#27ae60' : '#e74c3c' }">
+                            {{ sniperStatus.process_running ? 'ONLINE' : 'OFFLINE' }}
+                        </div>
+                        <div class="metric-label">Service Status</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">{{ sniperStatus.scheduled_attacks_count || 0 }}</div>
+                        <div class="metric-label">Scheduled Attacks</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">{{ sniperStatus.executed_attacks_count || 0 }}</div>
+                        <div class="metric-label">Executed Attacks</div>
+                    </div>
+                    <div class="metric" v-if="sniperStatus.port">
+                        <div class="metric-value">{{ sniperStatus.port }}</div>
+                        <div class="metric-label">Port</div>
+                    </div>
+                </div>
+                <div class="automation-item" style="margin-top: 1rem;">
+                    <button class="btn btn-start" @click="loadSniperAttacks">
+                        📋 View Scheduled Attacks
+                    </button>
+                    <button class="btn btn-pause" @click="loadSniperLogs">
+                        📝 View Sniper Logs
+                    </button>
+                    <button class="btn btn-start" @click="testSniperConnection">
+                        🔧 Test Connection
+                    </button>
+                    <button class="btn btn-pause" @click="debugSniper">
+                        🐛 Debug Details
+                    </button>
+                    <button class="btn btn-start" @click="scheduleTestAttack">
+                        🧪 Test Attack
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Sniper Attacks -->
+            <div class="card" v-if="sniperAttacks.length > 0">
+                <h2>⚔️ Scheduled Attacks</h2>
+                <div style="max-height: 300px; overflow-y: auto;">
+                    <div v-for="attack in sniperAttacks" :key="attack.attack_id" 
+                         style="padding: 0.75rem; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-weight: 600;">{{ attack.target_village_id }}</div>
+                            <div style="font-size: 0.8rem; color: #666;">
+                                {{ formatSniperTime(attack.execute_at) }}
+                            </div>
+                            <div style="font-size: 0.75rem; color: #999;">
+                                Units: {{ Object.entries(attack.units).map(([unit, count]) => `${count} ${unit}`).join(', ') }}
+                            </div>
+                        </div>
+                        <button class="btn btn-emergency" @click="cancelSniperAttack(attack.attack_id)" style="padding: 0.5rem 1rem; font-size: 0.8rem;">
+                            ❌ Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Sniper Logs -->
+            <div class="card logs" v-if="sniperLogs">
+                <h2>🎯 Sniper Logs</h2>
+                <div class="log-container" ref="sniperLogContainer">{{ sniperLogs }}</div>
             </div>
             
             <!-- Screenshot Stats -->
@@ -447,6 +605,9 @@
                             total_size_mb: 0
                         }
                     },
+                    sniperStatus: null,
+                    sniperAttacks: [],
+                    sniperLogs: '',
                     screenshots: [],
                     logs: [],
                     connectionStatus: 'disconnected',
@@ -460,6 +621,56 @@
                 }
             },
             methods: {
+                customConfirm(title, message) {
+                    return new Promise((resolve) => {
+                        // Create overlay
+                        const overlay = document.createElement('div');
+                        overlay.className = 'custom-confirm-overlay';
+                        
+                        // Create dialog
+                        overlay.innerHTML = `
+                            <div class="custom-confirm-dialog">
+                                <div class="custom-confirm-title">${title}</div>
+                                <div class="custom-confirm-message">${message}</div>
+                                <div class="custom-confirm-buttons">
+                                    <button class="custom-confirm-btn custom-confirm-ok">OK</button>
+                                    <button class="custom-confirm-btn custom-confirm-cancel">Cancel</button>
+                                </div>
+                            </div>
+                        `;
+                        
+                        // Add to page
+                        document.body.appendChild(overlay);
+                        
+                        // Handle button clicks
+                        const okBtn = overlay.querySelector('.custom-confirm-ok');
+                        const cancelBtn = overlay.querySelector('.custom-confirm-cancel');
+                        
+                        okBtn.onclick = () => {
+                            document.body.removeChild(overlay);
+                            resolve(true);
+                        };
+                        
+                        cancelBtn.onclick = () => {
+                            document.body.removeChild(overlay);
+                            resolve(false);
+                        };
+                        
+                        // Handle escape key
+                        const handleEscape = (e) => {
+                            if (e.key === 'Escape') {
+                                document.body.removeChild(overlay);
+                                document.removeEventListener('keydown', handleEscape);
+                                resolve(false);
+                            }
+                        };
+                        document.addEventListener('keydown', handleEscape);
+                        
+                        // Focus on OK button
+                        setTimeout(() => okBtn.focus(), 100);
+                    });
+                },
+                
                 connectWebSocket() {
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -524,29 +735,87 @@
                 },
                 
                 async emergencyStop() {
-                    await this.apiCall('/emergency-stop', 'POST');
+                    const confirmed = await this.customConfirm(
+                        '🚨 Emergency Stop',
+                        'Are you sure you want to emergency stop all automations?<br><br>This will immediately halt all running automations.'
+                    );
+                    if (confirmed) {
+                        const result = await this.apiCall('/emergency-stop', 'POST');
+                        if (result && result.status === 'success') {
+                            alert('✅ Emergency Stop: All automations have been stopped');
+                        } else {
+                            alert('❌ Emergency Stop Failed: Could not stop automations');
+                        }
+                    }
                 },
                 
                 async pauseAll() {
-                    await this.apiCall('/pause-all', 'POST');
+                    const result = await this.apiCall('/pause-all', 'POST');
+                    if (result && result.status === 'success') {
+                        alert('⏸️ Paused: All automations have been paused');
+                    } else {
+                        alert('❌ Pause Failed: Could not pause automations');
+                    }
                 },
                 
                 async resumeAll() {
-                    await this.apiCall('/resume-all', 'POST');
+                    const result = await this.apiCall('/resume-all', 'POST');
+                    if (result && result.status === 'success') {
+                        alert('▶️ Resumed: All automations have been resumed');
+                    } else {
+                        alert('❌ Resume Failed: Could not resume automations');
+                    }
                 },
                 
                 async startAutomation(name) {
-                    await this.apiCall(`/automation/${name}/start`, 'POST');
+                    const result = await this.apiCall(`/automation/${name}/start`, 'POST');
+                    if (result && result.status === 'success') {
+                        alert(`✅ Started: ${this.formatAutomationName(name)} has been started`);
+                    } else {
+                        alert(`❌ Start Failed: Could not start ${this.formatAutomationName(name)}`);
+                    }
                 },
                 
                 async stopAutomation(name) {
-                    await this.apiCall(`/automation/${name}/stop`, 'POST');
+                    const result = await this.apiCall(`/automation/${name}/stop`, 'POST');
+                    if (result && result.status === 'success') {
+                        alert(`⏹️ Stopped: ${this.formatAutomationName(name)} has been stopped`);
+                    } else {
+                        alert(`❌ Stop Failed: Could not stop ${this.formatAutomationName(name)}`);
+                    }
                 },
                 
                 async shutdownBot() {
-                    if (confirm('Are you sure you want to shutdown the bot?')) {
-                        await this.apiCall('/shutdown', 'POST');
-                        alert('Bot is shutting down...');
+                    const confirmed = await this.customConfirm(
+                        '🛑 Shutdown Bot',
+                        'Are you sure you want to shutdown the entire bot?<br><br>This will stop all operations and close the application.'
+                    );
+                    if (confirmed) {
+                        const result = await this.apiCall('/shutdown', 'POST');
+                        if (result && result.status === 'success') {
+                            alert('🛑 Shutting Down: Bot is shutting down...');
+                        } else {
+                            alert('❌ Shutdown Failed: Could not shutdown bot');
+                        }
+                    }
+                },
+                
+                async testCaptcha() {
+                    const confirmed = await this.customConfirm(
+                        '🧪 hCaptcha Test',
+                        'This will open the hCaptcha demo site to test the captcha solver.<br><br>The test will open a new browser tab and automatically attempt to solve challenges.'
+                    );
+                    if (confirmed) {
+                        try {
+                            const result = await this.apiCall('/captcha/test', 'POST');
+                            if (result && result.success) {
+                                alert('🧪 hCaptcha Test Started: Check browser and logs for progress');
+                            } else {
+                                alert('❌ Test Failed: ' + (result?.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            alert('❌ Test Error: ' + error.message);
+                        }
                     }
                 },
                 
@@ -567,6 +836,132 @@
                                 container.scrollTop = container.scrollHeight;
                             }
                         });
+                    }
+                },
+                
+                async loadSniperAttacks() {
+                    const data = await this.apiCall('/sniper/attacks');
+                    if (data && data.success) {
+                        this.sniperAttacks = data.data;
+                    }
+                },
+                
+                async loadSniperLogs() {
+                    // Load sniper logs from the Rust service or Python logs
+                    try {
+                        const data = await this.apiCall('/sniper/logs');
+                        if (data && data.success) {
+                            this.sniperLogs = data.data;
+                            this.$nextTick(() => {
+                                const container = this.$refs.sniperLogContainer;
+                                if (container) {
+                                    container.scrollTop = container.scrollHeight;
+                                }
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Failed to load sniper logs:', error);
+                    }
+                },
+                
+                async cancelSniperAttack(attackId) {
+                    const confirmed = await this.customConfirm(
+                        '❌ Cancel Attack',
+                        'Are you sure you want to cancel this scheduled attack?<br><br>This action cannot be undone.'
+                    );
+                    if (confirmed) {
+                        const result = await this.apiCall(`/sniper/attacks/${attackId}`, 'DELETE');
+                        if (result && result.success) {
+                            // Reload attacks list
+                            await this.loadSniperAttacks();
+                        }
+                    }
+                },
+                
+                formatSniperTime(isoString) {
+                    const date = new Date(isoString);
+                    return date.toLocaleString() + '.' + date.getMilliseconds().toString().padStart(3, '0');
+                },
+                
+                async testSniperConnection() {
+                    console.log('🔧 Testing sniper connection...');
+                    
+                    // Test 1: Check service status
+                    const status = await this.apiCall('/sniper/status');
+                    console.log('📊 Sniper status:', status);
+                    
+                    // Test 2: Try to load attacks
+                    const attacks = await this.apiCall('/sniper/attacks');
+                    console.log('📋 Sniper attacks:', attacks);
+                    
+                    // Test 3: Direct connection to rust service
+                    try {
+                        const directResponse = await fetch('http://127.0.0.1:9001/attacks');
+                        const directData = await directResponse.json();
+                        console.log('🦀 Direct Rust service attacks:', directData);
+                        
+                        // Test 4: Check rust service status
+                        const statusResponse = await fetch('http://127.0.0.1:9001/status');
+                        const statusData = await statusResponse.json();
+                        console.log('📊 Rust service status:', statusData);
+                    } catch (error) {
+                        console.log('❌ Direct connection failed:', error);
+                    }
+                    
+                    alert('ℹ️ Test Complete: Check console for detailed test results');
+                },
+                
+                async debugSniper() {
+                    console.log('🐛 Debugging sniper service...');
+                    
+                    const debug = await this.apiCall('/sniper/debug');
+                    console.log('🐛 Detailed sniper debug:', debug);
+                    
+                    if (debug && debug.success) {
+                        const data = debug.data;
+                        console.log('📊 Python status:', data.python_status);
+                        console.log('🦀 Rust status:', data.rust_status);
+                        console.log('📋 Rust attacks:', data.rust_attacks);
+                        console.log('📈 Attack counts:', {
+                            rust_count: data.rust_attacks_count,
+                            active_attacks: data.rust_status?.active_attacks,
+                            completed_attacks: data.rust_status?.completed_attacks,
+                            failed_attacks: data.rust_status?.failed_attacks
+                        });
+                    }
+                    
+                    alert('ℹ️ Debug Complete: Check console for detailed debug information');
+                },
+                
+                async scheduleTestAttack() {
+                    console.log('🧪 Scheduling test attack...');
+                    
+                    // Schedule an attack 5 minutes from now
+                    const now = new Date();
+                    const futureTime = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes from now
+                    
+                    const testAttack = {
+                        target_village_id: 12345,
+                        source_village_id: 67890,
+                        attack_type: 'attack',
+                        units: { spy: 1 },
+                        execute_at: futureTime.toISOString(),
+                        priority: 100
+                    };
+                    
+                    const result = await fetch('/api/sniper/attack', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(testAttack)
+                    }).then(r => r.json());
+                    console.log('🧪 Test attack result:', result);
+                    
+                    if (result && result.success) {
+                        alert(`✅ Test Attack Scheduled: Attack scheduled for ${futureTime.toLocaleTimeString()}`);
+                        // Refresh attacks list
+                        await this.loadSniperAttacks();
+                    } else {
+                        alert('❌ Test Attack Failed: ' + (result?.error || 'Unknown error'));
                     }
                 },
                 
@@ -598,6 +993,12 @@
                 // Load initial data
                 this.botStatus = await this.apiCall('/status');
                 await this.loadLogs();
+                
+                // Load sniper status
+                const sniperStatus = await this.apiCall('/sniper/status');
+                if (sniperStatus && sniperStatus.success) {
+                    this.sniperStatus = sniperStatus.data;
+                }
                 
                 // Periodic updates
                 setInterval(this.loadLogs, 10000); // Update logs every 10 seconds

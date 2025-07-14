@@ -3,6 +3,7 @@ Captcha Solver - Fixed to handle login captcha with button workaround
 """
 import asyncio
 import os
+import time
 from typing import Optional
 from playwright.async_api import Page, Frame, Locator
 
@@ -120,22 +121,22 @@ class CaptchaSolver:
                     logger.info(f"Quest element state - Visible: {is_visible}, Enabled: {is_enabled}")
                     
                     if is_visible and is_enabled:
-                        # Use JavaScript click as backup if normal click fails
-                        await page.evaluate("document.querySelector('#botprotection_quest').click()")
-                        logger.info("✅ Clicked bot protection quest via JavaScript - captcha should appear")
+                        # First try human-like click (preferred - generates real events)
+                        try:
+                            await quest_element.click(timeout=5000)
+                            logger.info("✅ Clicked bot protection quest with human-like click")
+                        except Exception as normal_click_error:
+                            logger.warning(f"⚠️ Normal click failed: {normal_click_error}")
+                            # Fallback to JavaScript click only if needed
+                            await page.evaluate("document.querySelector('#botprotection_quest').click()")
+                            logger.info("✅ Clicked bot protection quest via JavaScript fallback")
                     else:
                         logger.warning("⚠️ Quest element not clickable, falling back to manual mode")
                         return await self._manual_solve_fallback(page)
                         
                 except Exception as click_error:
                     logger.error(f"❌ Failed to click quest: {click_error}")
-                    # Try JavaScript click as fallback
-                    try:
-                        await page.evaluate("document.querySelector('#botprotection_quest').click()")
-                        logger.info("✅ Clicked quest via JavaScript fallback")
-                    except:
-                        logger.error("❌ JavaScript click also failed")
-                        return await self._manual_solve_fallback(page)
+                    return await self._manual_solve_fallback(page)
                 
                 # Wait for captcha to appear
                 await asyncio.sleep(3)
@@ -297,8 +298,16 @@ class CaptchaSolver:
                     logger.warning("⏱️ Challenge wait timed out")
                     await screenshot_manager.capture_captcha(page, "challenge_timeout")
                 except Exception as challenge_error:
+                    error_msg = str(challenge_error)
+                    if "Target page, context or browser has been closed" in error_msg:
+                        logger.warning("⚠️ Page was closed during challenge - stopping solver")
+                        return False  # Exit early instead of continuing
                     logger.error(f"❌ Challenge error: {challenge_error}")
-                    await screenshot_manager.capture_captcha(page, "challenge_error")
+                    try:
+                        if not page.is_closed():
+                            await screenshot_manager.capture_captcha(page, "challenge_error")
+                    except:
+                        pass  # Ignore screenshot errors if page is closed
                     
                 # Wait for result to process
                 await asyncio.sleep(3)
@@ -446,8 +455,16 @@ class CaptchaSolver:
                         logger.warning("⏱️ Challenge timeout")
                         await screenshot_manager.capture_captcha(page, f"timeout_{attempt}")
                     except Exception as e:
+                        error_msg = str(e)
+                        if "Target page, context or browser has been closed" in error_msg:
+                            logger.warning("⚠️ Page was closed during challenge - stopping solver")
+                            return False  # Exit early instead of continuing
                         logger.error(f"❌ Challenge error: {e}")
-                        await screenshot_manager.capture_captcha(page, f"error_{attempt}")
+                        try:
+                            if not page.is_closed():
+                                await screenshot_manager.capture_captcha(page, f"error_{attempt}")
+                        except:
+                            pass  # Ignore screenshot errors if page is closed
                         
                 except Exception as e:
                     logger.error(f"❌ Attempt {attempt + 1} failed: {e}", exc_info=True)

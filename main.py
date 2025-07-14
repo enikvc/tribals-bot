@@ -7,6 +7,7 @@ import signal
 import sys
 import os
 import time
+import argparse
 from datetime import datetime
 from pathlib import Path
 
@@ -117,6 +118,10 @@ class TribalsBot:
             # Start scheduler
             await self.scheduler.start()
             
+            # Open dashboard page in browser
+            if self.browser_manager:
+                await self.browser_manager._open_dashboard_page()
+            
             # Send startup notification
             await self.discord.send_success(
                 "🤖 Bot Started",
@@ -189,6 +194,17 @@ class TribalsBot:
 
 async def main():
     """Main entry point"""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Tribals Bot - Advanced automation for Tribal Wars')
+    parser.add_argument('--test-hcaptcha', action='store_true', 
+                       help='Test hCaptcha solver on demo site before starting bot')
+    args = parser.parse_args()
+    
+    # Set environment variable if flag is provided
+    if args.test_hcaptcha:
+        os.environ['TEST_HCAPTCHA'] = 'true'
+        logger.info("🧪 hCaptcha testing enabled via command line")
+    
     # Check Python version
     if sys.version_info < (3, 8):
         logger.error("❌ Python 3.8 or higher is required")

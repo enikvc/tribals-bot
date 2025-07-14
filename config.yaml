@@ -41,6 +41,13 @@ dashboard:
   enabled: true
   host: "127.0.0.1"  # Use 0.0.0.0 to allow external access
   port: 8080
+
+# Sniper Service Configuration
+sniper:
+  enabled: true
+  host: "127.0.0.1"
+  port: 9001
+  auto_start: true  # Automatically start Rust service
   
 # Server Configuration
 server:

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from ..automations.auto_buyer import AutoBuyer
 from ..automations.auto_farmer import AutoFarmer
 from ..automations.auto_scavenger import AutoScavenger
+from ..sniper.manager import SniperManager
 from ..utils.logger import setup_logger
 from ..utils.discord_webhook import DiscordNotifier
 from ..utils.helpers import time_until_hour
@@ -31,6 +32,9 @@ class Scheduler:
             'auto_scavenger': AutoScavenger(config, browser_manager)
         }
         
+        # Initialize sniper service
+        self.sniper_manager = SniperManager(config, browser_manager)
+        
         self.running = False
         self.emergency_stopped = False
         self.paused = False
@@ -42,6 +46,9 @@ class Scheduler:
         self.emergency_stopped = False
         self.paused = False
         logger.info("📅 Scheduler started")
+        
+        # Initialize sniper service asynchronously (non-blocking)
+        asyncio.create_task(self._initialize_sniper_async())
         
         # Check if we should start in sleep mode
         if not self.is_within_active_hours():
@@ -56,6 +63,17 @@ class Scheduler:
         
         # Monitor active hours
         asyncio.create_task(self.monitor_active_hours())
+    
+    async def _initialize_sniper_async(self):
+        """Initialize sniper service asynchronously without blocking startup"""
+        try:
+            logger.info("🎯 Initializing sniper service in background...")
+            if await self.sniper_manager.initialize():
+                logger.info("🎯 Sniper service ready for attack scheduling")
+            else:
+                logger.warning("⚠️ Sniper service failed to initialize - attacks won't be available")
+        except Exception as e:
+            logger.error(f"❌ Error initializing sniper service: {e}")
         
     async def stop(self):
         """Stop all automations"""
@@ -70,6 +88,9 @@ class Scheduler:
         for name, automation in self.automations.items():
             if automation.running:
                 await automation.stop()
+                
+        # Stop sniper service
+        await self.sniper_manager.shutdown()
                 
         logger.info("📅 Scheduler stopped")
         

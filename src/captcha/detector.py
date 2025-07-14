@@ -41,6 +41,7 @@ class CaptchaDetector:
                 # Get pages from main context
                 if self.browser_manager.main_context:
                     for page in self.browser_manager.main_context.pages:
+                        # Monitor only Tribals pages (not demo pages)
                         if not page.is_closed() and 'tribals.it' in page.url:
                             # Determine source name
                             source_name = None
