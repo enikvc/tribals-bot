@@ -729,9 +729,17 @@
                     throw new Error('Valori tempo non validi');
                 }
                 
-                // Create date object
+                // Create date object in local timezone
                 const date = new Date(dateStr);
                 date.setHours(hours, minutes, seconds, milliseconds);
+                
+                // Log timezone information for debugging
+                console.log('🕐 Parsed arrival time:', {
+                    localString: date.toString(),
+                    isoString: date.toISOString(),
+                    timezoneOffset: date.getTimezoneOffset(),
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+                });
                 
                 return date;
             } catch (error) {
@@ -814,8 +822,12 @@
                 const fireTime = new Date(arrivalTime.getTime() - (travelDuration * 1000) - latency);
                 
                 console.log('🧮 Calculated times:', {
-                    arrivalTime: arrivalTime.toISOString(),
-                    fireTime: fireTime.toISOString(),
+                    arrivalTimeLocal: arrivalTime.toLocaleString('it-IT'),
+                    arrivalTimeUTC: arrivalTime.toISOString(),
+                    fireTimeLocal: fireTime.toLocaleString('it-IT'),
+                    fireTimeUTC: fireTime.toISOString(),
+                    travelDuration: travelDuration + ' seconds',
+                    latency: latency + ' ms',
                     difference: (arrivalTime.getTime() - fireTime.getTime()) / 1000 + ' seconds'
                 });
                 
@@ -831,7 +843,14 @@
                     source_village_id: this.attackData.sourceVillageId,
                     attack_type: this.attackData.attackType,
                     units: this.attackData.units,
-                    execute_at: fireTime.toISOString(),
+                    // Send as local time ISO string (will be interpreted as local by Rust)
+                    execute_at: fireTime.getFullYear() + '-' + 
+                               String(fireTime.getMonth() + 1).padStart(2, '0') + '-' +
+                               String(fireTime.getDate()).padStart(2, '0') + 'T' +
+                               String(fireTime.getHours()).padStart(2, '0') + ':' +
+                               String(fireTime.getMinutes()).padStart(2, '0') + ':' +
+                               String(fireTime.getSeconds()).padStart(2, '0') + '.' +
+                               String(fireTime.getMilliseconds()).padStart(3, '0') + '+02:00',
                     priority: 100 // Fixed priority for all attacks
                 };
                 
@@ -865,12 +884,31 @@
                         second: '2-digit'
                     }) + `.${arrivalTime.getMilliseconds().toString().padStart(3, '0')}`;
                     
-                    this.showStatus(`✅ Snipe programmato! Lancio: ${fireTimeStr} → Arrivo: ${arrivalTimeStr}`, 'success');
+                    // Show local time (your timezone) in the success message
+                    this.showStatus(`✅ Snipe programmato! Lancio: ${fireTimeStr} (ora locale) → Arrivo: ${arrivalTimeStr}`, 'success');
                     
-                    // Optional: Ask if user wants to cancel the normal attack
-                    if (confirm('Snipe programmato con successo!\\n\\nVuoi annullare questo attacco normale e tornare indietro?')) {
-                        window.history.back();
-                    }
+                    // Log attack details with timezone info
+                    console.log('✅ Attack scheduled successfully:', {
+                        attackId: attackId,
+                        fireTimeLocal: fireTimeStr,
+                        fireTimeUTC: fireTime.toISOString(),
+                        arrivalTimeLocal: arrivalTimeStr,
+                        arrivalTimeUTC: arrivalTime.toISOString(),
+                        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                        timezoneOffset: new Date().getTimezoneOffset()
+                    });
+                    
+                    // Store attack ID in session storage to track it
+                    sessionStorage.setItem('lastScheduledAttack', attackId);
+                    console.log('📝 Stored attack ID in session:', attackId);
+                    
+                    // Show success without navigating away
+                    // This allows the attack to be properly processed before any navigation
+                    setTimeout(() => {
+                        if (confirm('Snipe programmato con successo!\\n\\nVuoi annullare questo attacco normale e tornare indietro?')) {
+                            window.history.back();
+                        }
+                    }, 500); // Small delay to ensure attack is processed
                 } else {
                     this.showStatus(`❌ Errore: ${result.error}`, 'error');
                 }

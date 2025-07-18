@@ -353,6 +353,40 @@
             background: #7f8c8d;
         }
         
+        /* Attack Item Styles */
+        .attack-item {
+            background: white;
+            transition: all 0.3s ease;
+        }
+        
+        .attack-item:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .attack-item.expanded {
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+        }
+        
+        .status-scheduled {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        
+        .status-processing {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+        
+        .status-completed {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+        
+        .status-failed {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+        
         @media (max-width: 768px) {
             .container {
                 grid-template-columns: 1fr;
@@ -509,23 +543,111 @@
             </div>
             
             <!-- Sniper Attacks -->
-            <div class="card" v-if="sniperAttacks.length > 0">
-                <h2>⚔️ Scheduled Attacks</h2>
-                <div style="max-height: 300px; overflow-y: auto;">
-                    <div v-for="attack in sniperAttacks" :key="attack.attack_id" 
-                         style="padding: 0.75rem; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <div style="font-weight: 600;">{{ attack.target_village_id }}</div>
-                            <div style="font-size: 0.8rem; color: #666;">
-                                {{ formatSniperTime(attack.execute_at) }}
-                            </div>
-                            <div style="font-size: 0.75rem; color: #999;">
-                                Units: {{ Object.entries(attack.units).map(([unit, count]) => `${count} ${unit}`).join(', ') }}
+            <div class="card logs" v-if="sniperAttacks.length > 0 || showAllAttacks">
+                <h2>⚔️ Attack History</h2>
+                <div style="margin-bottom: 1rem;">
+                    <button class="btn btn-start" @click="toggleShowAllAttacks" style="padding: 0.5rem 1rem; font-size: 0.8rem;">
+                        {{ showAllAttacks ? '📋 Show Active Only' : '📜 Show All Attacks' }}
+                    </button>
+                    <button class="btn btn-pause" @click="loadSniperAttacks" style="padding: 0.5rem 1rem; font-size: 0.8rem; margin-left: 0.5rem;">
+                        🔄 Refresh
+                    </button>
+                </div>
+                <div style="max-height: 600px; overflow-y: auto;">
+                    <div v-for="attack in filteredAttacks" :key="attack.attack_id" 
+                         class="attack-item"
+                         :class="{ 'expanded': expandedAttacks.includes(attack.attack_id) }"
+                         @click="toggleAttackDetails(attack.attack_id)"
+                         style="margin-bottom: 0.5rem; border: 1px solid #e0e0e0; border-radius: 8px; cursor: pointer; transition: all 0.3s;">
+                        
+                        <!-- Attack Summary -->
+                        <div style="padding: 1rem; background: #f8f9fa;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div style="flex: 1;">
+                                    <div style="display: flex; align-items: center; gap: 1rem;">
+                                        <span class="status-badge" :class="getAttackStatusClass(attack)" style="font-size: 0.75rem;">
+                                            {{ attack.status.toUpperCase() }}
+                                        </span>
+                                        <strong>{{ attack.source_village_id || 'N/A' }} → {{ attack.target_village_id || 'N/A' }}</strong>
+                                        <span style="color: #666;">{{ formatSniperTime(attack.scheduled_for) }}</span>
+                                    </div>
+                                    <div style="font-size: 0.85rem; color: #666; margin-top: 0.25rem;">
+                                        <span v-if="attack.executed_at">Executed: {{ formatSniperTime(attack.executed_at) }}</span>
+                                        <span v-if="attack.success === true" style="color: #27ae60; margin-left: 1rem;">✅ Success</span>
+                                        <span v-else-if="attack.success === false" style="color: #e74c3c; margin-left: 1rem;">❌ Failed</span>
+                                        <span v-if="attack.error" style="color: #e74c3c; margin-left: 0.5rem;">{{ attack.error }}</span>
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                    <span style="color: #999;">{{ expandedAttacks.includes(attack.attack_id) ? '▼' : '▶' }}</span>
+                                    <button v-if="attack.status === 'scheduled'" 
+                                            class="btn btn-emergency" 
+                                            @click.stop="cancelSniperAttack(attack.attack_id)" 
+                                            style="padding: 0.4rem 0.8rem; font-size: 0.75rem;">
+                                        ❌
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                        <button class="btn btn-emergency" @click="cancelSniperAttack(attack.attack_id)" style="padding: 0.5rem 1rem; font-size: 0.8rem;">
-                            ❌ Cancel
-                        </button>
+                        
+                        <!-- Attack Details (Expandable) -->
+                        <div v-if="expandedAttacks.includes(attack.attack_id)" 
+                             style="padding: 1rem; border-top: 1px solid #e0e0e0; background: white;">
+                            
+                            <!-- Attack Info -->
+                            <div style="margin-bottom: 1rem;">
+                                <h4 style="font-size: 0.9rem; margin-bottom: 0.5rem; color: #666;">📋 Attack Information</h4>
+                                <div style="font-family: monospace; font-size: 0.8rem; background: #f5f6fa; padding: 0.75rem; border-radius: 4px;">
+                                    <div>Attack ID: {{ attack.attack_id }}</div>
+                                    <div>Type: {{ attack.attack_type || 'attack' }}</div>
+                                    <div>Priority: {{ attack.priority || 100 }}</div>
+                                    <div v-if="attack.response_time_ms">Response Time: {{ attack.response_time_ms }}ms</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Units -->
+                            <div v-if="attack.units && Object.keys(attack.units).length > 0" style="margin-bottom: 1rem;">
+                                <h4 style="font-size: 0.9rem; margin-bottom: 0.5rem; color: #666;">⚔️ Units</h4>
+                                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                    <span v-for="(count, unit) in attack.units" :key="unit" 
+                                          style="background: #e3f2fd; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.8rem;">
+                                        {{ unit }}: {{ count }}
+                                    </span>
+                                </div>
+                            </div>
+                            
+                            <!-- Request Payload -->
+                            <div v-if="attack.payload" style="margin-bottom: 1rem;">
+                                <h4 style="font-size: 0.9rem; margin-bottom: 0.5rem; color: #666;">📤 Request Payload</h4>
+                                <pre style="background: #2c3e50; color: #ecf0f1; padding: 0.75rem; border-radius: 4px; font-size: 0.75rem; overflow-x: auto; max-height: 200px;">{{ JSON.stringify(attack.payload, null, 2) }}</pre>
+                            </div>
+                            
+                            <!-- Response -->
+                            <div v-if="attack.response" style="margin-bottom: 1rem;">
+                                <h4 style="font-size: 0.9rem; margin-bottom: 0.5rem; color: #666;">📥 Server Response</h4>
+                                <pre style="background: #2c3e50; color: #ecf0f1; padding: 0.75rem; border-radius: 4px; font-size: 0.75rem; overflow-x: auto; max-height: 300px;">{{ typeof attack.response === 'string' ? attack.response : JSON.stringify(attack.response, null, 2) }}</pre>
+                            </div>
+                            
+                            <!-- Actions -->
+                            <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                                <button class="btn btn-start" 
+                                        @click.stop="viewFullAttackDetails(attack)" 
+                                        style="padding: 0.4rem 0.8rem; font-size: 0.75rem;">
+                                    🔍 View Full Details
+                                </button>
+                                <button class="btn btn-pause" 
+                                        @click.stop="copyAttackDetails(attack)" 
+                                        style="padding: 0.4rem 0.8rem; font-size: 0.75rem;">
+                                    📋 Copy Details
+                                </button>
+                                <button v-if="attack.status === 'failed'" 
+                                        class="btn btn-emergency" 
+                                        @click.stop="retryAttack(attack)" 
+                                        style="padding: 0.4rem 0.8rem; font-size: 0.75rem;">
+                                    🔄 Retry
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -612,12 +734,22 @@
                     logs: [],
                     connectionStatus: 'disconnected',
                     ws: null,
-                    heartbeatInterval: null
+                    heartbeatInterval: null,
+                    expandedAttacks: [],
+                    showAllAttacks: false
                 }
             },
             computed: {
                 logsText() {
                     return this.logs.join('\n');
+                },
+                filteredAttacks() {
+                    if (this.showAllAttacks) {
+                        return this.sniperAttacks;
+                    }
+                    return this.sniperAttacks.filter(attack => 
+                        attack.status === 'scheduled' || attack.status === 'processing'
+                    );
                 }
             },
             methods: {
@@ -983,6 +1115,91 @@
                 
                 formatTimestamp(timestamp) {
                     return new Date(timestamp).toLocaleString();
+                },
+                
+                getAttackStatusClass(attack) {
+                    return `status-${attack.status}`;
+                },
+                
+                toggleShowAllAttacks() {
+                    this.showAllAttacks = !this.showAllAttacks;
+                },
+                
+                toggleAttackDetails(attackId) {
+                    const index = this.expandedAttacks.indexOf(attackId);
+                    if (index > -1) {
+                        this.expandedAttacks.splice(index, 1);
+                    } else {
+                        this.expandedAttacks.push(attackId);
+                    }
+                },
+                
+                async viewFullAttackDetails(attack) {
+                    // Get full details from API
+                    const response = await this.apiCall(`/sniper/attack/${attack.attack_id}`);
+                    if (response && response.success) {
+                        const details = response.data;
+                        console.log('Full attack details:', details);
+                        
+                        // Show in a nice format
+                        const detailsText = JSON.stringify(details, null, 2);
+                        const blob = new Blob([detailsText], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        window.open(url, '_blank');
+                    }
+                },
+                
+                copyAttackDetails(attack) {
+                    const details = {
+                        attack_id: attack.attack_id,
+                        status: attack.status,
+                        scheduled_for: attack.scheduled_for,
+                        executed_at: attack.executed_at,
+                        source_village_id: attack.source_village_id,
+                        target_village_id: attack.target_village_id,
+                        units: attack.units,
+                        success: attack.success,
+                        error: attack.error,
+                        response_time_ms: attack.response_time_ms
+                    };
+                    
+                    navigator.clipboard.writeText(JSON.stringify(details, null, 2))
+                        .then(() => alert('📋 Attack details copied to clipboard!'))
+                        .catch(err => alert('Failed to copy: ' + err));
+                },
+                
+                async retryAttack(attack) {
+                    const confirmed = await this.customConfirm(
+                        '🔄 Retry Attack',
+                        'Do you want to schedule this attack again?<br><br>The attack will be scheduled for 2 minutes from now.'
+                    );
+                    
+                    if (confirmed) {
+                        // Schedule for 2 minutes from now
+                        const executeAt = new Date(Date.now() + 2 * 60 * 1000);
+                        
+                        const newAttack = {
+                            source_village_id: attack.source_village_id,
+                            target_village_id: attack.target_village_id,
+                            attack_type: attack.attack_type || 'attack',
+                            units: attack.units,
+                            execute_at: executeAt.toISOString(),
+                            priority: attack.priority || 100
+                        };
+                        
+                        const result = await fetch('/api/sniper/attack', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(newAttack)
+                        }).then(r => r.json());
+                        
+                        if (result.success) {
+                            alert('✅ Attack rescheduled successfully!');
+                            await this.loadSniperAttacks();
+                        } else {
+                            alert('❌ Failed to reschedule: ' + (result.error || 'Unknown error'));
+                        }
+                    }
                 }
             },
             

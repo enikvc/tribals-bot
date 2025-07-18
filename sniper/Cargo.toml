@@ -8,7 +8,7 @@ tokio = { version = "1.36", features = ["full", "time"] }
 axum = "0.7.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-reqwest = { version = "0.11", features = ["json", "cookies"] }
+reqwest = { version = "0.11", features = ["json", "cookies", "gzip", "brotli"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 anyhow = "1.0"
@@ -18,3 +18,4 @@ tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 clap = { version = "4.0", features = ["derive"] }
 url = "2.5"
+flate2 = "1.0"

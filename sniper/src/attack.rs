@@ -32,33 +32,35 @@ impl AttackRequest {
     pub fn to_form_data(&self) -> HashMap<String, String> {
         let mut form_data = HashMap::new();
         
-        // Basic attack parameters based on TWB reference
+        // Core parameters matching TWB approach
         form_data.insert("ajaxaction".to_string(), "popup_command".to_string());
         form_data.insert("village".to_string(), self.source_village_id.to_string());
         form_data.insert("screen".to_string(), "place".to_string());
+        
+        // For popup_command, we can send the target village ID directly
+        // The game will handle the conversion to coordinates
         form_data.insert("target".to_string(), self.target_village_id.to_string());
         
-        // Attack type
+        // Attack type parameter - TWB uses actual button value
         let attack_type_param = match self.attack_type {
             AttackType::Attack => "attack",
             AttackType::Support => "support", 
             AttackType::Spy => "spy",
         };
-        form_data.insert("type".to_string(), attack_type_param.to_string());
+        form_data.insert(attack_type_param.to_string(), "true".to_string());
         
-        // Add units
+        // Add units - using simple unit names without array notation
         for (unit_type, count) in &self.units {
             if *count > 0 {
-                form_data.insert(format!("units[{}]", unit_type), count.to_string());
+                form_data.insert(unit_type.clone(), count.to_string());
             }
         }
         
-        // CSRF protection
+        // CSRF token
         form_data.insert("h".to_string(), self.csrf_token.clone());
         
-        // Additional required parameters
-        form_data.insert("x".to_string(), "1".to_string()); // Execute attack
-        form_data.insert("ch".to_string(), self.csrf_token.clone()); // Additional CSRF
+        // Source village parameter (some servers use this)
+        form_data.insert("source_village".to_string(), self.source_village_id.to_string());
         
         form_data
     }
@@ -70,7 +72,8 @@ impl AttackRequest {
         // Essential headers from TWB reference
         headers.insert("Accept".to_string(), "*/*".to_string());
         headers.insert("Accept-Language".to_string(), "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7".to_string());
-        headers.insert("Accept-Encoding".to_string(), "gzip, deflate, br".to_string());
+        // Don't request compressed responses to avoid decompression issues
+        headers.insert("Accept-Encoding".to_string(), "identity".to_string());
         headers.insert("Content-Type".to_string(), "application/x-www-form-urlencoded; charset=UTF-8".to_string());
         headers.insert("X-Requested-With".to_string(), "XMLHttpRequest".to_string());
         headers.insert("TribalWars-Ajax".to_string(), "1".to_string());

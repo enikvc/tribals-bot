@@ -153,7 +153,7 @@ class DashboardServer:
         
         @self.app.get("/api/sniper/attacks")
         async def list_attacks():
-            """List all scheduled attacks"""
+            """List all scheduled attacks with detailed information"""
             try:
                 logger.info("📋 Dashboard requesting sniper attacks list...")
                 if not self.scheduler or not self.scheduler.sniper_manager:
@@ -162,7 +162,19 @@ class DashboardServer:
                 
                 attacks = await self.scheduler.sniper_manager.list_scheduled_attacks()
                 logger.info(f"📋 Found {len(attacks)} scheduled attacks")
-                return {"success": True, "data": attacks}
+                
+                # Get detailed attack info from Rust service including payloads/responses
+                detailed_attacks = []
+                for attack in attacks:
+                    attack_detail = {
+                        **attack,
+                        "payload": None,
+                        "response": None
+                    }
+                    # We'll store these when attacks are executed
+                    detailed_attacks.append(attack_detail)
+                
+                return {"success": True, "data": detailed_attacks}
             except Exception as e:
                 logger.error(f"❌ Error listing attacks: {e}")
                 return {"success": False, "error": str(e)}
@@ -191,6 +203,16 @@ class DashboardServer:
                 except ValueError:
                     return {"success": False, "error": "Invalid datetime format"}
                 
+                # Always sync session data before scheduling to ensure it's valid
+                try:
+                    logger.info("📋 Syncing session data to sniper service...")
+                    await self.scheduler.sniper_manager.sync_session_data()
+                    # Small delay to ensure session is propagated
+                    await asyncio.sleep(0.1)
+                except Exception as e:
+                    logger.error(f"❌ Session sync failed: {e}")
+                    return {"success": False, "error": f"Session sync failed: {e}"}
+                
                 # Schedule attack
                 attack_id = await self.scheduler.sniper_manager.schedule_attack(
                     target_village_id=target_village_id,
@@ -206,6 +228,25 @@ class DashboardServer:
                 else:
                     return {"success": False, "error": "Failed to schedule attack"}
                     
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+        
+        @self.app.get("/api/sniper/attack/{attack_id}")
+        async def get_attack_details(attack_id: str):
+            """Get detailed information about a specific attack"""
+            try:
+                # Get attack from Rust service
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f'http://127.0.0.1:9001/attack/{attack_id}') as resp:
+                        if resp.status == 200:
+                            attack_data = await resp.json()
+                            # Enhance with any stored payload/response data
+                            return {"success": True, "data": attack_data}
+                        elif resp.status == 404:
+                            return {"success": False, "error": "Attack not found"}
+                        else:
+                            return {"success": False, "error": f"Error fetching attack: {resp.status}"}
             except Exception as e:
                 return {"success": False, "error": str(e)}
         
@@ -243,6 +284,28 @@ class DashboardServer:
                 
             except Exception as e:
                 logger.error(f"Error getting sniper logs: {e}")
+                return {"success": False, "error": str(e)}
+        
+        @self.app.post("/api/sniper/sync-session")
+        async def sync_session():
+            """Manually sync session data to sniper service"""
+            try:
+                if not self.scheduler or not self.scheduler.sniper_manager:
+                    return {"success": False, "error": "Sniper service not available"}
+                
+                logger.info("📋 Manual session sync requested...")
+                await self.scheduler.sniper_manager.sync_session_data()
+                
+                # Get current status
+                status = await self.scheduler.sniper_manager.get_service_status()
+                
+                return {
+                    "success": True, 
+                    "message": "Session data synced",
+                    "status": status
+                }
+            except Exception as e:
+                logger.error(f"Error syncing session: {e}")
                 return {"success": False, "error": str(e)}
         
         @self.app.get("/api/sniper/debug")

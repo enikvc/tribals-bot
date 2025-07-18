@@ -288,6 +288,13 @@ class SniperManager:
             session_data = await self.extract_session_data()
             
             if session_data:
+                # Debug log the session data (without sensitive values)
+                logger.debug(f"📋 Session data to sync: "
+                           f"cookies={len(session_data.get('cookies', {}))} items, "
+                           f"csrf_token={'present' if session_data.get('csrf_token') else 'missing'}, "
+                           f"village_id={session_data.get('village_id', 0)}, "
+                           f"player_id={session_data.get('player_id', 0)}")
+                
                 success = await self.client.update_session(session_data)
                 if success:
                     logger.info("📋 Session data synced to sniper service")

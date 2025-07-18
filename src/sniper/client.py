@@ -3,8 +3,8 @@ Python client for communicating with the Rust sniper service
 """
 import asyncio
 import json
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Optional, Any, Union
 import aiohttp
 from uuid import UUID
 
@@ -40,7 +40,7 @@ class SniperClient:
         if self.session and not self.session.closed:
             await self.session.close()
             
-    async def _request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
+    async def _request(self, method: str, endpoint: str, **kwargs) -> Any:
         """Make HTTP request to sniper service"""
         if not self.session or self.session.closed:
             await self.connect()
@@ -50,7 +50,9 @@ class SniperClient:
         try:
             async with self.session.request(method, url, **kwargs) as response:
                 if response.content_type == 'application/json':
-                    return await response.json()
+                    data = await response.json()
+                    # Return raw data, not wrapped
+                    return data
                 else:
                     text = await response.text()
                     if response.status >= 400:
@@ -85,6 +87,13 @@ class SniperClient:
             await self._request("POST", "/session", json=session_data)
             logger.info("📋 Updated sniper service session data")
             return True
+        except aiohttp.ClientResponseError as e:
+            # Log the response body for 400 errors
+            if e.status == 400:
+                logger.error(f"Session update failed with 400: {e.message}")
+            else:
+                logger.error(f"Session update failed: {e}")
+            return False
         except Exception as e:
             logger.error(f"Failed to update session: {e}")
             return False
@@ -112,16 +121,25 @@ class SniperClient:
         Returns:
             Attack ID if successful, None if failed
         """
-        # Ensure execute_at is timezone-aware
-        if execute_at.tzinfo is None:
-            execute_at = execute_at.replace(tzinfo=timezone.utc)
+        # Convert to local time if needed - Rust expects local time with timezone info
+        if execute_at.tzinfo is not None:
+            # Convert to local timezone
+            local_execute_at = execute_at.astimezone()
+        else:
+            # Add local timezone info if missing
+            import time
+            from datetime import timezone as tz
+            # Get local timezone offset
+            local_offset = -time.timezone if not time.daylight else -time.altzone
+            local_tz = tz(timedelta(seconds=local_offset))
+            local_execute_at = execute_at.replace(tzinfo=local_tz)
             
         request_data = {
             "target_village_id": target_village_id,
             "source_village_id": source_village_id,
             "attack_type": attack_type.lower(),
             "units": units,
-            "execute_at": execute_at.isoformat(),
+            "execute_at": local_execute_at.isoformat(),
             "priority": priority
         }
         
@@ -129,7 +147,8 @@ class SniperClient:
             response = await self._request("POST", "/attack/schedule", json=request_data)
             attack_id = response.get("attack_id")
             
-            logger.info(f"🎯 Scheduled {attack_type} attack {attack_id}: {source_village_id} -> {target_village_id} at {execute_at}")
+            # Log using local time
+            logger.info(f"🎯 Scheduled {attack_type} attack {attack_id}: {source_village_id} -> {target_village_id} at {local_execute_at.strftime('%Y-%m-%d %H:%M:%S')} local time")
             return attack_id
             
         except Exception as e:
@@ -163,18 +182,22 @@ class SniperClient:
     async def list_attacks(self) -> List[Dict[str, Any]]:
         """List all attacks (active and completed)"""
         try:
-            logger.info(f"📋 Requesting attacks from {self.base_url}/attacks")
+            logger.debug(f"📋 Requesting attacks from {self.base_url}/attacks")
             result = await self._request("GET", "/attacks")
-            logger.info(f"📋 Rust service returned {len(result) if isinstance(result, list) else 'non-list'} attacks: {result[:2] if isinstance(result, list) and len(result) > 0 else result}")
             
             # Handle different response formats
+            attacks = []
             if isinstance(result, dict) and "attacks" in result:
-                return result["attacks"]
+                attacks = result["attacks"]
             elif isinstance(result, list):
-                return result
+                attacks = result
             else:
                 logger.warning(f"⚠️ Unexpected response format: {result}")
-                return []
+                attacks = []
+            
+            # Log the actual attacks being returned
+            logger.info(f"📋 Rust service returned {len(attacks)} attacks{': ' + str(attacks[:1]) + '...' if attacks else ''}")
+            return attacks
                 
         except Exception as e:
             logger.error(f"Failed to list attacks: {e}")
